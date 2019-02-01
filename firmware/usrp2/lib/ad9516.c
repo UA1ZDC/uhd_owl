@@ -94,7 +94,7 @@ ad9516_clocks_enable_phy(bool enable, int divisor)
 {
   uint8_t enable_word, bypass_word;
   uint8_t div_word = 0x00;
-  enable_word = enable ? 0x42 : 0x43;
+  enable_word = enable ? 0x4A : 0x4B;
   bypass_word = (divisor == 1) ? 0x30 : 0x20;
 
   if(divisor != 1){
