@@ -32,6 +32,21 @@ MACRO(GEN_RMI target)
     )
 ENDMACRO(GEN_RMI)
 
+
+MACRO(GEN_COE target)
+    GET_FILENAME_COMPONENT(name ${target} NAME_WE)
+    #command to create a coe from elf
+    ADD_CUSTOM_COMMAND(
+        OUTPUT ${name}.coe DEPENDS ${name}.bin
+        COMMAND ${PYTHON_EXECUTABLE}
+        ${CMAKE_SOURCE_DIR}/bin/bin_to_coe_macro_init.py ${name}.bin ${name}.coe
+    )
+    #add a top level target for output files
+    ADD_CUSTOM_TARGET(
+        ${name}_coe ALL DEPENDS ${name}.coe
+    )
+ENDMACRO(GEN_RMI)
+
 ########################################################################
 ADD_EXECUTABLE(bootloader.elf ${CMAKE_SOURCE_DIR}/apps/txrx_uhd.c)
 ADD_DEFINITIONS(-DUSRP2P)
@@ -40,3 +55,4 @@ TARGET_LINK_LIBRARIES(bootloader.elf libusrp2pfw)
 SET(GEN_OUTPUTS_BIN_SIZE 0x3fff)
 GEN_OUTPUTS(bootloader.elf)
 GEN_RMI(bootloader.bin)
+GEN_COE(bootloader.bin)

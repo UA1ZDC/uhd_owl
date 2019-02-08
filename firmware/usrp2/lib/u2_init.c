@@ -39,12 +39,15 @@ u2_init(void)
   hal_disable_ints();
   hal_io_init();
 
-
   // init spi, so that we can switch over to the high-speed clock
   spi_init();
 
   // set up the default clocks
   clocks_init();
+
+  output_regs->phy_ctrl |= 0x01;		//PHY_RESET
+  mdelay(300);
+  output_regs->phy_ctrl &= ~0x01;
 
   // set up ADC reg's
   ltc2185_init();
@@ -57,7 +60,6 @@ u2_init(void)
   hal_enable_ints();
 
   // flash all leds to let us know board is alive
-#ifndef BOOTLOADER
   hal_set_led_src(0x0, 0x1f); /* software ctrl */
   hal_set_leds(0x0, 0x1f);    mdelay(300);
 
@@ -97,10 +99,6 @@ u2_init(void)
   }
     //hal_set_leds(0x0,    0x1f); mdelay(100);
     //hal_set_leds(blinks, 0x1f); mdelay(100);
-
-
-
-#endif
   hal_set_led_src(0x1f & ~LED_D, 0x1f); /* hardware ctrl */
   hal_set_leds(LED_D, 0x1f);  // Leave one on
 

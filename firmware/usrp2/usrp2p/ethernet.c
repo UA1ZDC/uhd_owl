@@ -125,8 +125,8 @@ ed_check_phy_state(void)
   int new_speed = S_UNKNOWN;
 
   if (VERBOSE){
-    putstr("LANSR: ");
-    puthex16_nl(lansr);
+	    putstr("LANSR: ");
+	    puthex16_nl(lansr);
   }
 
   if (lansr & LANSR_LINK_GOOD){		// link's up

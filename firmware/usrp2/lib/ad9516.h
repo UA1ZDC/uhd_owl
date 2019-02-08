@@ -67,14 +67,17 @@
 #define DIVIDERs_OFF		0x60
 
 /*
- * Analog Device AD9510 1.2 GHz Clock Distribution IC w/ PLL
+ * Analog Device AD9516 1.6 GHz Clock Distribution IC w/ PLL
  */
 
 void ad9516_write_reg(int regno, uint8_t value);
+
 int  ad9516_read_reg(int regno);
 
 void ad9516_clocks_enable_fpga(bool enable, int divisor);
 
 void ad9516_clocks_enable_phy(bool enable, int divisor);
+
+void ad9516_clocks_enable(bool enable);
 
 #endif /* AD9516_H_ */

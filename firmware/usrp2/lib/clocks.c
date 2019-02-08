@@ -39,19 +39,16 @@ clocks_init(void)
   // Set up basic clocking functions in AD9510
   //ad9510_write_reg(0x45, 0x01);
 
-  ad9516_clocks_enable_fpga(true, 1);
+  //output_regs->phy_ctrl |= 0x01;		//PHY_RESET
+  //output_regs->dac_ctrl |= 0x01;		//DAC_RESET
 
   ad9516_clocks_enable_phy(true, 4);
 
-  while(!clocks_lock_detect());
   //issue a reset to the DCM so it locks up to the new freq
   output_regs->clk_ctrl |= CLK_RESET;
 
-  output_regs->phy_ctrl |= 0x01;		//PHY_RESET
-  output_regs->dac_ctrl |= 0x01;		//DAC_RESET
-  mdelay(1);
-  output_regs->phy_ctrl &= ~0x01;
-  output_regs->dac_ctrl &= ~0x01;
+  //output_regs->phy_ctrl &= ~0x01;
+  //output_regs->dac_ctrl &= ~0x01;
 }
 
 bool 

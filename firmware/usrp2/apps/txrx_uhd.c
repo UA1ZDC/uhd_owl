@@ -40,6 +40,8 @@
 #include <string.h>
 #include <stdbool.h>
 
+#include "mdelay.h"
+
 #ifdef BOOTLOADER
 #include <bootloader_utils.h>
 #endif
@@ -311,6 +313,7 @@ main(void)
 {
   u2_init();
   arp_cache_init();
+
 #ifdef BOOTLOADER
   putstr("\nHello World from SDR Board!\n\nMy Super UDP bootloader! =)\n");
 #else

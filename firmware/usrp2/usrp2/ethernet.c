@@ -127,6 +127,12 @@ ed_check_phy_state(void)
   if (VERBOSE){
     putstr("LANSR: ");
     puthex16_nl(lansr);
+
+    putstr("Reg 0x10: ");
+    puthex16_nl(eth_mac_miim_read(0x10));
+
+    putstr("Reg 0x12: ");
+    puthex16_nl(eth_mac_miim_read(0x12));
   }
 
   if (lansr & LANSR_LINK_GOOD){		// link's up
