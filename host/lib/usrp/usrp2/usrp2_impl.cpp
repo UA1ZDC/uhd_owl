@@ -1,25 +1,14 @@
 //
-// Copyright 2010-2012,2014 Ettus Research LLC
+// Copyright 2010-2012,2014,2017 Ettus Research, A National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include "usrp2_impl.hpp"
 #include "fw_common.h"
-#include "apply_corrections.hpp"
+#include <uhdlib/usrp/common/apply_corrections.hpp>
 #include <uhd/utils/log.hpp>
-#include <uhd/utils/msg.hpp>
+
 #include <uhd/exception.hpp>
 #include <uhd/transport/if_addrs.hpp>
 #include <uhd/transport/udp_zero_copy.hpp>
@@ -29,10 +18,7 @@
 #include <uhd/utils/byteswap.hpp>
 #include <uhd/utils/safe_call.hpp>
 #include <boost/format.hpp>
-#include <boost/foreach.hpp>
-#include <boost/lexical_cast.hpp>
 #include <boost/bind.hpp>
-#include <boost/assign/list_of.hpp>
 #include <boost/asio/ip/address_v4.hpp>
 #include <boost/asio.hpp> //used for htonl and ntohl
 #include <boost/thread.hpp>
@@ -54,7 +40,7 @@ device_addrs_t usrp2_find(const device_addr_t &hint_){
     if (hints.size() > 1){
         device_addrs_t found_devices;
         std::string error_msg;
-        BOOST_FOREACH(const device_addr_t &hint_i, hints){
+        for(const device_addr_t &hint_i:  hints){
             device_addrs_t found_devices_i = usrp2_find(hint_i);
             if (found_devices_i.size() != 1) error_msg += str(boost::format(
                 "Could not resolve device hint \"%s\" to a single device."
@@ -81,7 +67,7 @@ device_addrs_t usrp2_find(const device_addr_t &hint_){
 
     //if no address was specified, send a broadcast on each interface
     if (not hint.has_key("addr")){
-        BOOST_FOREACH(const if_addrs_t &if_addrs, get_if_addrs()){
+        for(const if_addrs_t &if_addrs:  get_if_addrs()){
             //avoid the loopback device
             if (if_addrs.inet == asio::ip::address_v4::loopback().to_string()) continue;
 
@@ -106,7 +92,7 @@ device_addrs_t usrp2_find(const device_addr_t &hint_){
         udp_transport = udp_simple::make_broadcast(hint["addr"], BOOST_STRINGIZE(USRP2_UDP_CTRL_PORT));
     }
     catch(const std::exception &e){
-        UHD_MSG(error) << boost::format("Cannot open UDP transport on %s\n%s") % hint["addr"] % e.what() << std::endl;
+        UHD_LOGGER_ERROR("USRP2") << boost::format("Cannot open UDP transport on %s\n%s") % hint["addr"] % e.what() ;
         return usrp2_addrs; //dont throw, but return empty address so caller can insert
     }
 
@@ -120,11 +106,11 @@ device_addrs_t usrp2_find(const device_addr_t &hint_){
     }
     catch(const std::exception &ex)
     {
-        UHD_MSG(error) << "USRP2 Network discovery error " << ex.what() << std::endl;
+        UHD_LOGGER_ERROR("USRP2") << "USRP2 Network discovery error " << ex.what() ;
     }
     catch(...)
     {
-        UHD_MSG(error) << "USRP2 Network discovery unknown error " << std::endl;
+        UHD_LOGGER_ERROR("USRP2") << "USRP2 Network discovery unknown error " ;
     }
 
     //loop and recieve until the timeout
@@ -284,7 +270,7 @@ static zero_copy_if::sptr make_xport(
 
     //only copy hints that contain the filter word
     device_addr_t filtered_hints;
-    BOOST_FOREACH(const std::string &key, hints.keys()){
+    for(const std::string &key:  hints.keys()){
         if (key.find(filter) == std::string::npos) continue;
         filtered_hints[key] = hints[key];
     }
@@ -317,9 +303,10 @@ static zero_copy_if::sptr make_xport(
  * Structors
  **********************************************************************/
 usrp2_impl::usrp2_impl(const device_addr_t &_device_addr) :
-    device_addr(_device_addr)
+    device_addr(_device_addr),
+    _pirate_task_exit(false)
 {
-    UHD_MSG(status) << "Opening a USRP2/N-Series device..." << std::endl;
+    UHD_LOGGER_INFO("USRP2") << "Opening a USRP2/N-Series device...";
 
     //setup the dsp transport hints (default to a large recv buff)
     if (not device_addr.has_key("recv_buff_size")){
@@ -334,7 +321,7 @@ usrp2_impl::usrp2_impl(const device_addr_t &_device_addr) :
     if (not device_addr.has_key("send_buff_size")){
         //The buffer should be the size of the SRAM on the device,
         //because we will never commit more than the SRAM can hold.
-        device_addr["send_buff_size"] = boost::lexical_cast<std::string>(USRP2_SRAM_BYTES);
+        device_addr["send_buff_size"] = std::to_string(USRP2_SRAM_BYTES);
     }
 
     device_addrs_t device_args = separate_device_addr(device_addr);
@@ -353,11 +340,11 @@ usrp2_impl::usrp2_impl(const device_addr_t &_device_addr) :
             mtu.send_mtu = std::min(mtu.send_mtu, mtu_i.send_mtu);
         }
 
-        device_addr["recv_frame_size"] = boost::lexical_cast<std::string>(mtu.recv_mtu);
-        device_addr["send_frame_size"] = boost::lexical_cast<std::string>(mtu.send_mtu);
+        device_addr["recv_frame_size"] = std::to_string(mtu.recv_mtu);
+        device_addr["send_frame_size"] = std::to_string(mtu.send_mtu);
 
-        UHD_MSG(status) << boost::format("Current recv frame size: %d bytes") % mtu.recv_mtu << std::endl;
-        UHD_MSG(status) << boost::format("Current send frame size: %d bytes") % mtu.send_mtu << std::endl;
+        UHD_LOGGER_INFO("USRP2") << boost::format("Current recv frame size: %d bytes") % mtu.recv_mtu;
+        UHD_LOGGER_INFO("USRP2") << boost::format("Current send frame size: %d bytes") % mtu.send_mtu;
     }
     catch(const uhd::not_implemented_error &){
         //just ignore this error, makes older fw work...
@@ -375,7 +362,7 @@ usrp2_impl::usrp2_impl(const device_addr_t &_device_addr) :
 
     for (size_t mbi = 0; mbi < device_args.size(); mbi++){
         const device_addr_t device_args_i = device_args[mbi];
-        const std::string mb = boost::lexical_cast<std::string>(mbi);
+        const std::string mb = std::to_string(mbi);
         const std::string addr = device_args_i["addr"];
         const fs_path mb_path = "/mboards/" + mb;
 
@@ -406,16 +393,13 @@ usrp2_impl::usrp2_impl(const device_addr_t &_device_addr) :
         case usrp2_iface::USRP_N200_R4:
         case usrp2_iface::USRP_N210:
         case usrp2_iface::USRP_N210_R4:
-
-        case usrp2_iface::USRP_N210_XK:
-        case usrp2_iface::USRP_N210_XA:
             expected_fpga_compat_num = N200_FPGA_COMPAT_NUM;
             break;
         default:
             // handle case where the MB EEPROM is not programmed
             if (fpga_major == USRP2_FPGA_COMPAT_NUM or fpga_major == N200_FPGA_COMPAT_NUM)
             {
-                UHD_MSG(warning)  << "Unable to identify device - assuming USRP2/N-Series device" << std::endl;
+                UHD_LOGGER_WARNING("USRP2")  << "Unable to identify device - assuming USRP2/N-Series device" ;
                 expected_fpga_compat_num = fpga_major;
             }
         }
@@ -436,19 +420,19 @@ usrp2_impl::usrp2_impl(const device_addr_t &_device_addr) :
         ////////////////////////////////////////////////////////////////
         // construct transports for RX and TX DSPs
         ////////////////////////////////////////////////////////////////
-        UHD_LOG << "Making transport for RX DSP0..." << std::endl;
+        UHD_LOGGER_TRACE("USRP2") << "Making transport for RX DSP0..." ;
         _mbc[mb].rx_dsp_xports.push_back(make_xport(
             addr, BOOST_STRINGIZE(USRP2_UDP_RX_DSP0_PORT), device_args_i, "recv"
         ));
-        UHD_LOG << "Making transport for RX DSP1..." << std::endl;
+        UHD_LOGGER_TRACE("USRP2") << "Making transport for RX DSP1..." ;
         _mbc[mb].rx_dsp_xports.push_back(make_xport(
             addr, BOOST_STRINGIZE(USRP2_UDP_RX_DSP1_PORT), device_args_i, "recv"
         ));
-        UHD_LOG << "Making transport for TX DSP0..." << std::endl;
+        UHD_LOGGER_TRACE("USRP2") << "Making transport for TX DSP0..." ;
         _mbc[mb].tx_dsp_xport = make_xport(
             addr, BOOST_STRINGIZE(USRP2_UDP_TX_DSP0_PORT), device_args_i, "send"
         );
-        UHD_LOG << "Making transport for Control..." << std::endl;
+        UHD_LOGGER_TRACE("USRP2") << "Making transport for Control..." ;
         _mbc[mb].fifo_ctrl_xport = make_xport(
             addr, BOOST_STRINGIZE(USRP2_UDP_FIFO_CRTL_PORT), device_addr_t(), ""
         );
@@ -462,9 +446,6 @@ usrp2_impl::usrp2_impl(const device_addr_t &_device_addr) :
         case usrp2_iface::USRP_N210:
         case usrp2_iface::USRP_N200_R4:
         case usrp2_iface::USRP_N210_R4:
-
-        case usrp2_iface::USRP_N210_XK:
-        case usrp2_iface::USRP_N210_XA:
             _mbc[mb].wbiface = _mbc[mb].fifo_ctrl;
             _mbc[mb].spiface = _mbc[mb].fifo_ctrl;
             break;
@@ -480,7 +461,8 @@ usrp2_impl::usrp2_impl(const device_addr_t &_device_addr) :
         ////////////////////////////////////////////////////////////////
         _tree->create<mboard_eeprom_t>(mb_path / "eeprom")
             .set(_mbc[mb].iface->mb_eeprom)
-            .add_coerced_subscriber(boost::bind(&usrp2_impl::set_mb_eeprom, this, mb, _1));
+            .add_coerced_subscriber(
+                boost::bind(&usrp2_impl::set_mb_eeprom, this, mb, _1));
 
         ////////////////////////////////////////////////////////////////
         // create clock control objects
@@ -510,32 +492,18 @@ usrp2_impl::usrp2_impl(const device_addr_t &_device_addr) :
             _tree->create<meta_range_t>(rx_codec_path / "gains/fine/range").set(meta_range_t(0, 0.5, 0.05));
             _tree->create<double>(rx_codec_path / "gains/fine/value")
                 .add_coerced_subscriber(boost::bind(&usrp2_codec_ctrl::set_rx_digital_fine_gain, _mbc[mb].codec, _1)).set(0);
-
-            _tree->create<std::string>(tx_codec_path / "name").set("ad9777");
-        }break;
-
-
-        case usrp2_iface::USRP_N210_XK:{
-            _tree->create<std::string>(rx_codec_path / "name").set("LTC2185");
-            _tree->create<std::string>(tx_codec_path / "name").set("AD9142A");
-        }break;
-        case usrp2_iface::USRP_N210_XA:{
-            _tree->create<std::string>(rx_codec_path / "name").set("LTC2185");
-            _tree->create<std::string>(tx_codec_path / "name").set("AD9777");
         }break;
 
         case usrp2_iface::USRP2_REV3:
         case usrp2_iface::USRP2_REV4:
             _tree->create<std::string>(rx_codec_path / "name").set("ltc2284");
-            _tree->create<std::string>(tx_codec_path / "name").set("ad9777");
             break;
 
         case usrp2_iface::USRP_NXXX:
             _tree->create<std::string>(rx_codec_path / "name").set("??????");
-            _tree->create<std::string>(tx_codec_path / "name").set("ad9777");
             break;
         }
-
+        _tree->create<std::string>(tx_codec_path / "name").set("ad9777");
 
         ////////////////////////////////////////////////////////////////////
         // Create the GPSDO control
@@ -548,9 +516,6 @@ usrp2_impl::usrp2_impl(const device_addr_t &_device_addr) :
         case usrp2_iface::USRP_N210:
         case usrp2_iface::USRP_N200_R4:
         case usrp2_iface::USRP_N210_R4:
-
-        case usrp2_iface::USRP_N210_XK:
-        case usrp2_iface::USRP_N210_XA:
             break;
         default:
             _mbc[mb].iface->pokefw(U2_FW_REG_HAS_GPSDO, dont_look_for_gpsdo);
@@ -559,18 +524,18 @@ usrp2_impl::usrp2_impl(const device_addr_t &_device_addr) :
         //otherwise if not disabled, look for the internal GPSDO
         if (_mbc[mb].iface->peekfw(U2_FW_REG_HAS_GPSDO) != dont_look_for_gpsdo)
         {
-            UHD_MSG(status) << "Detecting internal GPSDO.... " << std::flush;
+            UHD_LOGGER_INFO("USRP2") << "Detecting internal GPSDO.... ";
             try{
                 _mbc[mb].gps = gps_ctrl::make(udp_simple::make_uart(udp_simple::make_connected(
                     addr, BOOST_STRINGIZE(USRP2_UDP_UART_GPS_PORT)
                 )));
             }
             catch(std::exception &e){
-                UHD_MSG(error) << "An error occurred making GPSDO control: " << e.what() << std::endl;
+                UHD_LOGGER_ERROR("USRP2") << "An error occurred making GPSDO control: " << e.what() ;
             }
             if (_mbc[mb].gps and _mbc[mb].gps->gps_detected())
             {
-                BOOST_FOREACH(const std::string &name, _mbc[mb].gps->get_sensors())
+                for(const std::string &name:  _mbc[mb].gps->get_sensors())
                 {
                     _tree->create<sensor_value_t>(mb_path / "sensors" / name)
                         .set_publisher(boost::bind(&gps_ctrl::get_sensor, _mbc[mb].gps, name));
@@ -656,21 +621,44 @@ usrp2_impl::usrp2_impl(const device_addr_t &_device_addr) :
         // create tx dsp control objects
         ////////////////////////////////////////////////////////////////
         _mbc[mb].tx_dsp = tx_dsp_core_200::make(
-            _mbc[mb].wbiface, U2_REG_SR_ADDR(SR_TX_DSP), U2_REG_SR_ADDR(SR_TX_CTRL), USRP2_TX_ASYNC_SID
+            _mbc[mb].wbiface,
+            U2_REG_SR_ADDR(SR_TX_DSP),
+            U2_REG_SR_ADDR(SR_TX_CTRL),
+            USRP2_TX_ASYNC_SID
         );
         _mbc[mb].tx_dsp->set_link_rate(USRP2_LINK_RATE_BPS);
+        { // This scope can be removed once we're able to do named captures
+        auto this_tx_dsp = _mbc[mb].tx_dsp; // This can then also go away
         _tree->access<double>(mb_path / "tick_rate")
-            .add_coerced_subscriber(boost::bind(&tx_dsp_core_200::set_tick_rate, _mbc[mb].tx_dsp, _1));
+            .add_coerced_subscriber([this_tx_dsp](const double rate){
+                this_tx_dsp->set_tick_rate(rate);
+            })
+        ;
         _tree->create<meta_range_t>(mb_path / "tx_dsps/0/rate/range")
-            .set_publisher(boost::bind(&tx_dsp_core_200::get_host_rates, _mbc[mb].tx_dsp));
+            .set_publisher([this_tx_dsp](){
+                return this_tx_dsp->get_host_rates();
+            })
+        ;
         _tree->create<double>(mb_path / "tx_dsps/0/rate/value")
             .set(1e6) //some default
-            .set_coercer(boost::bind(&tx_dsp_core_200::set_host_rate, _mbc[mb].tx_dsp, _1))
-            .add_coerced_subscriber(boost::bind(&usrp2_impl::update_tx_samp_rate, this, mb, 0, _1));
+            .set_coercer([this_tx_dsp](const double rate){
+                return this_tx_dsp->set_host_rate(rate);
+            })
+            .add_coerced_subscriber([this, mb](const double rate){
+                this->update_tx_samp_rate(mb, 0, rate);
+            })
+        ;
+        } // End of non-C++14 scope (to release reference to this_tx_dsp)
         _tree->create<double>(mb_path / "tx_dsps/0/freq/value")
-            .set_coercer(boost::bind(&tx_dsp_core_200::set_freq, _mbc[mb].tx_dsp, _1));
+            .set_coercer([this, mb](const double rate){
+                return this->set_tx_dsp_freq(mb, rate);
+            })
+        ;
         _tree->create<meta_range_t>(mb_path / "tx_dsps/0/freq/range")
-            .set_publisher(boost::bind(&tx_dsp_core_200::get_freq_range, _mbc[mb].tx_dsp));
+            .set_publisher([this, mb](){
+                return this->get_tx_dsp_freq_range(mb);
+            })
+        ;
 
         //setup dsp flow control
         const double ups_per_sec = device_args_i.cast<double>("ups_per_sec", 20);
@@ -710,18 +698,18 @@ usrp2_impl::usrp2_impl(const device_addr_t &_device_addr) :
         _tree->create<std::string>(mb_path / "clock_source/value")
             .add_coerced_subscriber(boost::bind(&usrp2_impl::update_clock_source, this, mb, _1))
             .set("internal");
-        std::vector<std::string> clock_sources = boost::assign::list_of("internal")("external")("mimo");
-        if (_mbc[mb].gps and _mbc[mb].gps->gps_detected()) clock_sources.push_back("gpsdo");
-        _tree->create<std::vector<std::string> >(mb_path / "clock_source/options").set(clock_sources);
+        std::vector<std::string> clock_sources{"internal", "external", "mimo"};
+        if (_mbc[mb].gps and _mbc[mb].gps->gps_detected()) {
+            clock_sources.push_back("gpsdo");
+        }
+        _tree->create<std::vector<std::string>>(mb_path / "clock_source/options")
+            .set(clock_sources);
         //plug timed commands into tree here
         switch(_mbc[mb].iface->get_rev()){
         case usrp2_iface::USRP_N200:
         case usrp2_iface::USRP_N210:
         case usrp2_iface::USRP_N200_R4:
         case usrp2_iface::USRP_N210_R4:
-
-        case usrp2_iface::USRP_N210_XK:
-        case usrp2_iface::USRP_N210_XA:
             _tree->create<time_spec_t>(mb_path / "time/cmd")
                 .add_coerced_subscriber(boost::bind(&usrp2_fifo_ctrl::set_time, _mbc[mb].fifo_ctrl, _1));
         default: break; //otherwise, do not register
@@ -762,19 +750,19 @@ usrp2_impl::usrp2_impl(const device_addr_t &_device_addr) :
 
         //create a new dboard interface and manager
         _mbc[mb].dboard_manager = dboard_manager::make(
-            rx_db_eeprom.id, tx_db_eeprom.id, gdb_eeprom.id,
+            rx_db_eeprom, tx_db_eeprom, gdb_eeprom,
             make_usrp2_dboard_iface(_mbc[mb].wbiface, _mbc[mb].iface/*i2c*/, _mbc[mb].spiface, _mbc[mb].clock),
             _tree->subtree(mb_path / "dboards/A")
         );
 
         //bind frontend corrections to the dboard freq props
         const fs_path db_tx_fe_path = mb_path / "dboards" / "A" / "tx_frontends";
-        BOOST_FOREACH(const std::string &name, _tree->list(db_tx_fe_path)){
+        for(const std::string &name:  _tree->list(db_tx_fe_path)){
             _tree->access<double>(db_tx_fe_path / name / "freq" / "value")
                 .add_coerced_subscriber(boost::bind(&usrp2_impl::set_tx_fe_corrections, this, mb, _1));
         }
         const fs_path db_rx_fe_path = mb_path / "dboards" / "A" / "rx_frontends";
-        BOOST_FOREACH(const std::string &name, _tree->list(db_rx_fe_path)){
+        for(const std::string &name:  _tree->list(db_rx_fe_path)){
             _tree->access<double>(db_rx_fe_path / name / "freq" / "value")
                 .add_coerced_subscriber(boost::bind(&usrp2_impl::set_rx_fe_corrections, this, mb, _1));
         }
@@ -785,14 +773,14 @@ usrp2_impl::usrp2_impl(const device_addr_t &_device_addr) :
 
     //do some post-init tasks
     this->update_rates();
-    BOOST_FOREACH(const std::string &mb, _mbc.keys()){
+    for(const std::string &mb:  _mbc.keys()){
         fs_path root = "/mboards/" + mb;
 
         //reset cordic rates and their properties to zero
-        BOOST_FOREACH(const std::string &name, _tree->list(root / "rx_dsps")){
+        for(const std::string &name:  _tree->list(root / "rx_dsps")){
             _tree->access<double>(root / "rx_dsps" / name / "freq" / "value").set(0.0);
         }
-        BOOST_FOREACH(const std::string &name, _tree->list(root / "tx_dsps")){
+        for(const std::string &name:  _tree->list(root / "tx_dsps")){
             _tree->access<double>(root / "tx_dsps" / name / "freq" / "value").set(0.0);
         }
 
@@ -804,7 +792,7 @@ usrp2_impl::usrp2_impl(const device_addr_t &_device_addr) :
         //GPS installed: use external ref, time, and init time spec
         if (_mbc[mb].gps and _mbc[mb].gps->gps_detected()){
             _mbc[mb].time64->enable_gpsdo();
-            UHD_MSG(status) << "Setting references to the internal GPSDO" << std::endl;
+            UHD_LOGGER_INFO("USRP2") << "Setting references to the internal GPSDO" ;
             _tree->access<std::string>(root / "time_source/value").set("gpsdo");
             _tree->access<std::string>(root / "clock_source/value").set("gpsdo");
         }
@@ -813,14 +801,11 @@ usrp2_impl::usrp2_impl(const device_addr_t &_device_addr) :
 }
 
 usrp2_impl::~usrp2_impl(void){UHD_SAFE_CALL(
-    BOOST_FOREACH(const std::string &mb, _mbc.keys()){
+    _pirate_task_exit = true;
+    for(const std::string &mb:  _mbc.keys()){
         _mbc[mb].tx_dsp->set_updates(0, 0);
     }
 )}
-
-void usrp2_impl::set_mb_eeprom(const std::string &mb, const uhd::usrp::mboard_eeprom_t &mb_eeprom){
-    mb_eeprom.commit(*(_mbc[mb].iface), USRP2_EEPROM_MAP_KEY);
-}
 
 void usrp2_impl::set_db_eeprom(const std::string &mb, const std::string &type, const uhd::usrp::dboard_eeprom_t &db_eeprom){
     if (type == "rx") db_eeprom.store(*_mbc[mb].iface, USRP2_I2C_ADDR_RX_DB);
@@ -850,6 +835,49 @@ void usrp2_impl::set_tx_fe_corrections(const std::string &mb, const double lo_fr
     }
 }
 
+double usrp2_impl::set_tx_dsp_freq(
+    const std::string &mb,
+    const double freq_
+) {
+    double new_freq = freq_;
+    const double tick_rate =
+        _tree->access<double>("/mboards/"+mb+"/tick_rate").get();
+
+    //calculate the DAC shift (multiples of rate)
+    const int sign = boost::math::sign(new_freq);
+    const int zone = std::min(boost::math::iround(new_freq/tick_rate), 2);
+    const double dac_shift = sign*zone*tick_rate;
+    new_freq -= dac_shift; //update FPGA DSP target freq
+    UHD_LOG_TRACE("USRP2",
+        "DSP Tuning: Requested " + std::to_string(freq_/1e6) + " MHz, Using "
+        "Nyquist zone " + std::to_string(sign*zone) + ", leftover DSP tuning: "
+        + std::to_string(new_freq/1e6) + " MHz.");
+
+    //set the DAC shift (modulation mode)
+    if (zone == 0) {
+        _mbc[mb].codec->set_tx_mod_mode(0); //no shift
+    } else {
+        _mbc[mb].codec->set_tx_mod_mode(sign*4/zone); //DAC interp = 4
+    }
+
+    return _mbc[mb].tx_dsp->set_freq(new_freq) + dac_shift; //actual freq
+}
+
+meta_range_t usrp2_impl::get_tx_dsp_freq_range(const std::string &mb)
+{
+    const double dac_rate =
+        _tree->access<double>("/mboards/" + mb + "/tick_rate").get()
+        * _mbc[mb].codec->get_tx_interpolation();
+    const auto dsp_range_step = _mbc[mb].tx_dsp->get_freq_range().step();
+    // The DSP tuning rate is the entire range of the DAC clock rate. The step
+    // size is determined by the FPGA IP, however.
+    return meta_range_t(
+        -dac_rate / 2,
+        +dac_rate / 2,
+        dsp_range_step
+    );
+}
+
 #include <boost/math/special_functions/round.hpp>
 #include <boost/math/special_functions/sign.hpp>
 
@@ -861,9 +889,6 @@ void usrp2_impl::update_clock_source(const std::string &mb, const std::string &s
     case usrp2_iface::USRP_N210:
     case usrp2_iface::USRP_N200_R4:
     case usrp2_iface::USRP_N210_R4:
-
-    case usrp2_iface::USRP_N210_XK:
-    case usrp2_iface::USRP_N210_XA:
         if      (source == "internal")  _mbc[mb].iface->poke32(U2_REG_MISC_CTRL_CLOCK, 0x12);
         else if (source == "external")  _mbc[mb].iface->poke32(U2_REG_MISC_CTRL_CLOCK, 0x1C);
         else if (source == "gpsdo")     _mbc[mb].iface->poke32(U2_REG_MISC_CTRL_CLOCK, 0x1C);
@@ -894,9 +919,6 @@ void usrp2_impl::update_clock_source(const std::string &mb, const std::string &s
         case usrp2_iface::USRP_N210:
         case usrp2_iface::USRP_N200_R4:
         case usrp2_iface::USRP_N210_R4:
-
-        case usrp2_iface::USRP_N210_XK:
-        case usrp2_iface::USRP_N210_XA:
             _mbc[mb].clock->set_mimo_clock_delay(mimo_clock_delay_usrp_n2xx);
             break;
 

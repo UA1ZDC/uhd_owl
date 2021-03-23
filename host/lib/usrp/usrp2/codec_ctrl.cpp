@@ -1,32 +1,18 @@
 //
 // Copyright 2010-2012,2014 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include "codec_ctrl.hpp"
 #include "ad9777_regs.hpp"
-#include "ad9142a_regs.hpp"
 #include "ads62p44_regs.hpp"
 #include "usrp2_regs.hpp"
 #include <uhd/utils/log.hpp>
 #include <uhd/utils/safe_call.hpp>
 #include <uhd/exception.hpp>
 #include <stdint.h>
-#include <boost/foreach.hpp>
-#include <boost/thread/thread.hpp>
-#include <uhd/utils/msg.hpp>
 
 using namespace uhd;
 
@@ -43,14 +29,28 @@ public:
         _iface = iface;
         _spiface = spiface;
 
-        switch(_iface->get_rev()){
-        case usrp2_iface::USRP_N210_XK:
-        	setup_the_ad9142a_dac();
-        	break;
-        default:
-        	setup_the_ad9777_dac();
+        //setup the ad9777 dac
+        _ad9777_regs.x_1r_2r_mode = ad9777_regs_t::X_1R_2R_MODE_1R;
+        _ad9777_regs.filter_interp_rate = ad9777_regs_t::FILTER_INTERP_RATE_4X;
+        _ad9777_regs.mix_mode = ad9777_regs_t::MIX_MODE_COMPLEX;
+        _ad9777_regs.pll_divide_ratio = ad9777_regs_t::PLL_DIVIDE_RATIO_DIV1;
+        _ad9777_regs.pll_state = ad9777_regs_t::PLL_STATE_ON;
+        _ad9777_regs.auto_cp_control = ad9777_regs_t::AUTO_CP_CONTROL_AUTO;
+        //I dac values
+        _ad9777_regs.idac_fine_gain_adjust = 0;
+        _ad9777_regs.idac_coarse_gain_adjust = 0xf;
+        _ad9777_regs.idac_offset_adjust_lsb = 0;
+        _ad9777_regs.idac_offset_adjust_msb = 0;
+        //Q dac values
+        _ad9777_regs.qdac_fine_gain_adjust = 0;
+        _ad9777_regs.qdac_coarse_gain_adjust = 0xf;
+        _ad9777_regs.qdac_offset_adjust_lsb = 0;
+        _ad9777_regs.qdac_offset_adjust_msb = 0;
+        //write all regs
+        for(uint8_t addr = 0; addr <= 0xC; addr++){
+            this->send_ad9777_reg(addr);
         }
-
+        set_tx_mod_mode(0);
 
         //power-up adc
         switch(_iface->get_rev()){
@@ -117,110 +117,6 @@ public:
         }
     )}
 
-
-
-
-    void setup_the_ad9142a_dac(){
-    	_ad9142a_regs.DEVICE_RESET = 1;
-    	this->send_ad9142a_reg(0x00);
-
-    	_ad9142a_regs.INTERRUPT_CONFIGURATION = 1;
-    	this->send_ad9142a_reg(0x20);
-
-    	_ad9142a_regs.DIGLOGIC_DIVIDER = 0;
-    	_ad9142a_regs.VCO_DIVIDER = 2;
-    	_ad9142a_regs.LOOP_DIVIDER = 1;
-    	this->send_ad9142a_reg(0x14);
-    	this->send_ad9142a_reg(0x15);
-
-    	_ad9142a_regs.PLL_ENABLE = 1;
-    	_ad9142a_regs.AUTO_MANUAL_SEL = 1;
-    	this->send_ad9142a_reg(0x12);
-
-    	_ad9142a_regs.AUTO_MANUAL_SEL = 0;
-    	this->send_ad9142a_reg(0x12);
-    	boost::this_thread::sleep(boost::posix_time::milliseconds(10));
-
-    	_ad9142a_regs.DELAY_CELL0_ENABLE = 0xFE;
-    	_ad9142a_regs.DELAY_CELL1_ENABLE = 0x67;
-    	this->send_ad9142a_reg(0x5E);
-    	this->send_ad9142a_reg(0x5F);
-
-    	_ad9142a_regs.LOW_DCI_EN = 1;
-    	_ad9142a_regs.DC_COUPLE_LOW_EN = 1;
-    	_ad9142a_regs.DUTY_CORRECTION_ENABLE = 0;
-    	this->send_ad9142a_reg(0x0D);
-    	this->send_ad9142a_reg(0x0A);
-
-    	_ad9142a_regs.IQ_GAIN_ADJ_DCOFFSET_ENABLE = 1;
-    	this->send_ad9142a_reg(0x27);
-
-    	_ad9142a_regs.INTERPOLATION_MODE = 2;
-    	this->send_ad9142a_reg(0x28);
-
-    	_ad9142a_regs.FIFO_SPI_RESET_REQUEST = 1;
-    	this->send_ad9142a_reg(0x25);
-    	boost::this_thread::sleep(boost::posix_time::milliseconds(10));
-    	_ad9142a_regs.FIFO_SPI_RESET_REQUEST = 0;
-    	this->send_ad9142a_reg(0x25);
-
-    	_ad9142a_regs.INVSINC_ENABLE = 1;
-    	this->send_ad9142a_reg(0x27);
-	
-
-	//_ad9142a_regs.IDAC_FULLSCALE_ADJUST_LSB = 0;
-	//this->send_ad9142a_reg(0x18);
-	//_ad9142a_regs.QDAC_FULLSCALE_ADJUST_LSB = 0;
-	//this->send_ad9142a_reg(0x1A);
-
-	//_ad9142a_regs.IDAC_FULLSCALE_ADJUST_MSB = 0;
-	//this->send_ad9142a_reg(0x19);
-	//_ad9142a_regs.QDAC_FULLSCALE_ADJUST_MSB = 0;
-	//this->send_ad9142a_reg(0x1B);
-
-    	_ad9142a_regs.PD_IDAC = 0;
-    	_ad9142a_regs.PD_QDAC = 0;
-    	this->send_ad9142a_reg(0x01);
-
-
-/*    	this->read_ad9142a_reg(0x17);
-
-    	this->read_ad9142a_reg(0x06);
-    	this->read_ad9142a_reg(0x05);
-
-    	this->read_ad9142a_reg(0x42);
-    	this->read_ad9142a_reg(0x43);
-
-    	this->read_ad9142a_reg(0x0E);
-    	this->read_ad9142a_reg(0x01);*/
-    }
-
-
-    void setup_the_ad9777_dac(){
-    	//setup the ad9777 dac
-		_ad9777_regs.x_1r_2r_mode = ad9777_regs_t::X_1R_2R_MODE_1R;
-		_ad9777_regs.filter_interp_rate = ad9777_regs_t::FILTER_INTERP_RATE_4X;
-		_ad9777_regs.mix_mode = ad9777_regs_t::MIX_MODE_COMPLEX;
-		_ad9777_regs.pll_divide_ratio = ad9777_regs_t::PLL_DIVIDE_RATIO_DIV1;
-		_ad9777_regs.pll_state = ad9777_regs_t::PLL_STATE_ON;
-		_ad9777_regs.auto_cp_control = ad9777_regs_t::AUTO_CP_CONTROL_AUTO;
-		//I dac values
-		_ad9777_regs.idac_fine_gain_adjust = 0;
-		_ad9777_regs.idac_coarse_gain_adjust = 0xf;
-		_ad9777_regs.idac_offset_adjust_lsb = 0;
-		_ad9777_regs.idac_offset_adjust_msb = 0;
-		//Q dac values
-		_ad9777_regs.qdac_fine_gain_adjust = 0;
-		_ad9777_regs.qdac_coarse_gain_adjust = 0xf;
-		_ad9777_regs.qdac_offset_adjust_lsb = 0;
-		_ad9777_regs.qdac_offset_adjust_msb = 0;
-		//write all regs
-		for(uint8_t addr = 0; addr <= 0xC; addr++){
-			this->send_ad9777_reg(addr);
-		}
-		set_tx_mod_mode(0);
-    }
-
     void set_tx_mod_mode(int mod_mode){
         //set the sign of the frequency shift
         _ad9777_regs.modulation_form = (mod_mode > 0)?
@@ -283,52 +179,24 @@ public:
         }
     }
 
+    size_t get_tx_interpolation() const
+    {
+        return 4;
+    }
+
 private:
     ad9777_regs_t _ad9777_regs;
-
-    ad9142a_regs_t _ad9142a_regs;
-
     ads62p44_regs_t _ads62p44_regs;
     usrp2_iface::sptr _iface;
     uhd::spi_iface::sptr _spiface;
 
     void send_ad9777_reg(uint8_t addr){
         uint16_t reg = _ad9777_regs.get_write_reg(addr);
-        UHD_LOGV(always) << "send_ad9777_reg: " << std::hex << reg << std::endl;
+        UHD_LOG_TRACE("USRP2", "send_ad9777_reg: 0x" << std::hex << reg);
         _spiface->write_spi(
             SPI_SS_AD9777, spi_config_t::EDGE_RISE,
             reg, 16
         );
-    }
-
-    void send_ad9142a_reg(uint16_t addr){
-		uint32_t reg = _ad9142a_regs.get_write_reg(addr);
-		UHD_LOGV(always) << "send_ad9142a_reg: " << std::hex << reg << std::endl;
-		_spiface->write_spi(
-			SPI_SS_AD9142A, spi_config_t::EDGE_RISE,
-			reg, 24
-		);
-		//UHD_MSG(status) << boost::format("AD9142A: %x") %reg << std::endl;
-	}
-
-    void write_ad9142a_reg(uint16_t addr,uint8_t data){
-    	uint32_t reg = (boost::uint16_t(addr) << 8) | data;
-		_spiface->write_spi(
-			SPI_SS_AD9142A, spi_config_t::EDGE_RISE,
-			reg, 24
-		);
-		UHD_MSG(status) << boost::format("AD9142A: %x") %reg << std::endl;
-	}
-
-    uint32_t read_ad9142a_reg(uint16_t addr){
-    	uint32_t reg = _ad9142a_regs.get_read_reg(addr);
-    	uint32_t readback = _spiface->read_spi(
-    				SPI_SS_AD9142A, spi_config_t::EDGE_RISE,
-    				reg, 24
-    			);
-    	readback &= 0x7fffff;
-    	UHD_MSG(status) << boost::format("read AD9142A: %x") %readback << std::endl;
-    	return readback;
     }
 
     void send_ads62p44_reg(uint8_t addr) {

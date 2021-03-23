@@ -1,18 +1,8 @@
 //
 // Copyright 2010-2012 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #ifndef INCLUDED_USRP2_REGS_HPP
@@ -70,10 +60,6 @@
 #define SPI_SS_TX_ADC   64
 #define SPI_SS_TX_DB   128
 #define SPI_SS_ADS62P44 256 //for usrp2p
-
-#define SPI_SS_AD9516    1
-#define SPI_SS_AD9142A   2
-#define SPI_SS_LTC2185  256 //for usrp2xk
 
 /////////////////////////////////////////////////
 // Misc Control

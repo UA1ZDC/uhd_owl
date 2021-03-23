@@ -1,18 +1,8 @@
 //
 // Copyright 2015-2016 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include <cstring>
@@ -65,15 +55,6 @@ using namespace uhd::transport;
 #define N200_PROD_FPGA_IMAGE_ADDR  0x00180000
 #define N200_SAFE_FPGA_IMAGE_ADDR  0x00000000
 
-
-#define N200_XK_FW_MAX_SIZE_BYTES 0x3fff	//16kB
-#define N200_XK_PROD_FW_IMAGE_ADDR  0x00f80000		//15.5MB
-#define N200_XK_SAFE_FW_IMAGE_ADDR  0x00f00000		//15MB
-
-#define N200_XK_FPGA_MAX_SIZE_BYTES 0xA00000	//10MB
-#define N200_XK_PROD_FPGA_IMAGE_ADDR  0x00500000	//5MB
-#define N200_XK_SAFE_FPGA_IMAGE_ADDR  0x00000000
-
 /*
  * Packet codes
  */
@@ -109,35 +90,32 @@ typedef enum {
 /*
  * Mapping revision numbers to names
  */
-static const uhd::dict<boost::uint32_t, std::string> n200_filename_map = boost::assign::map_list_of
+static const uhd::dict<uint32_t, std::string> n200_filename_map = boost::assign::map_list_of
     (0,      "n2xx")    // Is an N-Series, but the EEPROM value is invalid
     (0xa,    "n200_r3")
     (0x100a, "n200_r4")
     (0x10a,  "n210_r3")
     (0x110a, "n210_r4")
-
-	(0x210a, "n210_xk")
-	(0x200a, "n210_xa")
 ;
 
 /*
  * Packet structure
  */
 typedef struct {
-    boost::uint32_t proto_ver;
-    boost::uint32_t id;
-    boost::uint32_t seq;
+    uint32_t proto_ver;
+    uint32_t id;
+    uint32_t seq;
     union {
-        boost::uint32_t ip_addr;
-        boost::uint32_t hw_rev;
+        uint32_t ip_addr;
+        uint32_t hw_rev;
         struct {
-            boost::uint32_t flash_addr;
-            boost::uint32_t length;
-            boost::uint8_t  data[256];
+            uint32_t flash_addr;
+            uint32_t length;
+            uint8_t  data[256];
         } flash_args;
         struct {
-            boost::uint32_t sector_size_bytes;
-            boost::uint32_t memory_size_bytes;
+            uint32_t sector_size_bytes;
+            uint32_t memory_size_bytes;
         } flash_info_args;
     } data;
 } n200_fw_update_data_t;
@@ -152,10 +130,10 @@ typedef struct {
     uhd::device_addr_t dev_addr;
     std::string        burn_type;
     std::string        filepath;
-    boost::uint8_t     data_in[udp_simple::mtu];
-    boost::uint32_t    size;
-    boost::uint32_t    max_size;
-    boost::uint32_t    flash_addr;
+    uint8_t     data_in[udp_simple::mtu];
+    uint32_t    size;
+    uint32_t    max_size;
+    uint32_t    flash_addr;
     udp_simple::sptr   xport;
 } n200_session_t;
 
@@ -202,9 +180,9 @@ static void print_usrp2_error(const image_loader::image_loader_args_t &image_loa
 static UHD_INLINE size_t n200_send_and_recv(udp_simple::sptr xport,
                                             n200_fw_update_id_t pkt_code,
                                             n200_fw_update_data_t *pkt_out,
-                                            boost::uint8_t* data){
-    pkt_out->proto_ver = htonx<boost::uint32_t>(USRP2_FW_COMPAT_NUM);
-    pkt_out->id = htonx<boost::uint32_t>(pkt_code);
+                                            uint8_t* data){
+    pkt_out->proto_ver = htonx<uint32_t>(USRP2_FW_COMPAT_NUM);
+    pkt_out->id = htonx<uint32_t>(pkt_code);
     xport->send(boost::asio::buffer(pkt_out, sizeof(*pkt_out)));
     return xport->recv(boost::asio::buffer(data, udp_simple::mtu), UDP_TIMEOUT);
 }
@@ -227,7 +205,7 @@ static uhd::device_addr_t n200_find(const image_loader::image_loader_args_t &ima
         uhd::device_addrs_t n200_found;
         udp_simple::sptr rev_xport;
         n200_fw_update_data_t pkt_out;
-        boost::uint8_t data_in[udp_simple::mtu];
+        uint8_t data_in[udp_simple::mtu];
         const n200_fw_update_data_t *pkt_in = reinterpret_cast<const n200_fw_update_data_t*>(data_in);
         size_t len = 0;
 
@@ -237,7 +215,7 @@ static uhd::device_addr_t n200_find(const image_loader::image_loader_args_t &ima
          * this query. If the user supplied specific arguments that
          * led to a USRP2, throw an error.
          */
-        BOOST_FOREACH(const uhd::device_addr_t &dev, found){
+        for(const uhd::device_addr_t &dev:  found){
             rev_xport = udp_simple::make_connected(
                             dev.get("addr"),
                             BOOST_STRINGIZE(N200_UDP_FW_UPDATE_PORT)
@@ -245,7 +223,7 @@ static uhd::device_addr_t n200_find(const image_loader::image_loader_args_t &ima
 
             len = n200_send_and_recv(rev_xport, GET_HW_REV_CMD, &pkt_out, data_in);
             if(n200_response_matches(pkt_in, GET_HW_REV_ACK, len)){
-                boost::uint32_t rev = ntohl(pkt_in->data.hw_rev);
+                uint32_t rev = ntohl(pkt_in->data.hw_rev);
                 std::string hw_rev = n200_filename_map.get(rev, "n2xx");
 
                 n200_found.push_back(dev);
@@ -269,7 +247,7 @@ static uhd::device_addr_t n200_find(const image_loader::image_loader_args_t &ima
             std::string err_msg = "Could not resolve given args to a single N-Series device.\n"
                                   "Applicable devices:\n";
 
-            BOOST_FOREACH(const uhd::device_addr_t &dev, n200_found){
+            for(const uhd::device_addr_t &dev:  n200_found){
                 err_msg += str(boost::format("* %s (addr=%s)\n")
                                % dev.get("hw_rev")
                                % dev.get("addr"));
@@ -294,10 +272,7 @@ static void n200_validate_firmware_image(n200_session_t &session){
     }
 
     session.size     = fs::file_size(session.filepath);
-
-    if(session.dev_addr["hw_rev"] == "n210_xk") session.max_size = N200_XK_FW_MAX_SIZE_BYTES;
-    else if(session.dev_addr["hw_rev"] == "n210_xa") session.max_size = N200_XK_FW_MAX_SIZE_BYTES;
-    else session.max_size = N200_FW_MAX_SIZE_BYTES;
+    session.max_size = N200_FW_MAX_SIZE_BYTES;
 
     if(session.size > session.max_size){
         throw uhd::runtime_error(str(boost::format("The specified firmware image is too large: %d vs. %d")
@@ -306,14 +281,14 @@ static void n200_validate_firmware_image(n200_session_t &session){
 
     // File must have proper header
     std::ifstream image_file(session.filepath.c_str(), std::ios::binary);
-    boost::uint8_t test_bytes[4];
+    uint8_t test_bytes[4];
     image_file.seekg(0, std::ios::beg);
     image_file.read((char*)test_bytes,4);
     image_file.close();
-    /*for(int i = 0; i < 4; i++) if(test_bytes[i] != 11){
+    for(int i = 0; i < 4; i++) if(test_bytes[i] != 11){
         throw uhd::runtime_error(str(boost::format("The file at path \"%s\" is not a valid firmware image.")
                                      % session.filepath));
-    }*/
+    }
 }
 
 /*
@@ -326,9 +301,7 @@ static void n200_validate_fpga_image(n200_session_t &session){
     }
 
     session.size     = fs::file_size(session.filepath);
-    if(session.dev_addr["hw_rev"] == "n210_xk") session.max_size = N200_XK_FPGA_MAX_SIZE_BYTES;
-    else if(session.dev_addr["hw_rev"] == "n210_xa") session.max_size = N200_XK_FPGA_MAX_SIZE_BYTES;
-    else session.max_size = N200_FPGA_MAX_SIZE_BYTES;
+    session.max_size = N200_FPGA_MAX_SIZE_BYTES;
 
     if(session.size > session.max_size){
         throw uhd::runtime_error(str(boost::format("The specified FPGA image is too large: %d vs. %d")
@@ -337,11 +310,11 @@ static void n200_validate_fpga_image(n200_session_t &session){
 
     // File must have proper header
     std::ifstream image_file(session.filepath.c_str(), std::ios::binary);
-    boost::uint8_t test_bytes[63];
+    uint8_t test_bytes[63];
     image_file.seekg(0, std::ios::beg);
     image_file.read((char*)test_bytes, 63);
     bool is_good = false;
-    for(int i = 0; i < 63; i++){
+    for(int i = 0; i < 62; i++){
         if(test_bytes[i] == 255) continue;
         else if(test_bytes[i] == 170 and
                 test_bytes[i+1] == 153){
@@ -374,9 +347,9 @@ static void n200_setup_session(n200_session_t &session,
      * EEPROM or is otherwise unable to provide its revision, this is
      * impossible, and the user must manually provide a firmware file.
      */
-    if(session.fw and image_loader_args.firmware_path == ""){
-        if((session.dev_addr["hw_rev"] == "n2xx") or (session.dev_addr["hw_rev"] == "n210_xk")
-        										or (session.dev_addr["hw_rev"] == "n210_xa")){
+    if((session.fw and image_loader_args.firmware_path == "") or
+       image_loader_args.fpga_path == ""){
+        if(session.dev_addr["hw_rev"] == "n2xx"){
             throw uhd::runtime_error("This device's revision cannot be determined. "
                                      "You must manually specify a filepath.");
         }
@@ -395,34 +368,17 @@ static void n200_setup_session(n200_session_t &session,
     else           n200_validate_fpga_image(session);
 
     session.overwrite_safe = image_loader_args.args.has_key("overwrite-safe");
-
-    if(session.dev_addr["hw_rev"] == "n210_xk" or (session.dev_addr["hw_rev"] == "n210_xa")){
-    	if(session.overwrite_safe){
-    		session.flash_addr = session.fw ? N200_XK_SAFE_FW_IMAGE_ADDR
-                                        	: N200_XK_SAFE_FPGA_IMAGE_ADDR;
-    		session.burn_type = session.fw ? "firmware safe"
-                                       	   : "FPGA safe";
-    	}
-    	else{
-    		session.flash_addr = session.fw ? N200_XK_PROD_FW_IMAGE_ADDR
-                                        	: N200_XK_PROD_FPGA_IMAGE_ADDR;
-    		session.burn_type = session.fw ? "firmware"
-                                       	   : "FPGA";
-    	}
+    if(session.overwrite_safe){
+        session.flash_addr = session.fw ? N200_SAFE_FW_IMAGE_ADDR
+                                        : N200_SAFE_FPGA_IMAGE_ADDR;
+        session.burn_type = session.fw ? "firmware safe"
+                                       : "FPGA safe";
     }
     else{
-    	if(session.overwrite_safe){
-    		session.flash_addr = session.fw ? N200_SAFE_FW_IMAGE_ADDR
-                                        	: N200_SAFE_FPGA_IMAGE_ADDR;
-    		session.burn_type = session.fw ? "firmware safe"
-                                       	   : "FPGA safe";
-    	}
-    	else{
-    		session.flash_addr = session.fw ? N200_PROD_FW_IMAGE_ADDR
-                                        	: N200_PROD_FPGA_IMAGE_ADDR;
-    		session.burn_type = session.fw ? "firmware"
-                                       	   : "FPGA";
-    	}
+        session.flash_addr = session.fw ? N200_PROD_FW_IMAGE_ADDR
+                                        : N200_PROD_FPGA_IMAGE_ADDR;
+        session.burn_type = session.fw ? "firmware"
+                                       : "FPGA";
     }
 
     session.xport = udp_simple::make_connected(session.dev_addr["addr"],
@@ -436,8 +392,8 @@ static void n200_erase_image(n200_session_t &session){
     const n200_fw_update_data_t *pkt_in = reinterpret_cast<const n200_fw_update_data_t*>(session.data_in);
 
     // Setting up UDP packet
-    pkt_out.data.flash_args.flash_addr = htonx<boost::uint32_t>(session.flash_addr);
-    pkt_out.data.flash_args.length = htonx<boost::uint32_t>(session.size);
+    pkt_out.data.flash_args.flash_addr = htonx<uint32_t>(session.flash_addr);
+    pkt_out.data.flash_args.length = htonx<uint32_t>(session.size);
 
     // Begin erasing
     size_t len = n200_send_and_recv(session.xport, ERASE_FLASH_CMD, &pkt_out, session.data_in);
@@ -486,10 +442,10 @@ static void n200_write_image(n200_session_t &session){
 
     // Write image
     std::ifstream image(session.filepath.c_str(), std::ios::binary);
-    boost::uint32_t current_addr = session.flash_addr;
-    pkt_out.data.flash_args.length = htonx<boost::uint32_t>(N200_FLASH_DATA_PACKET_SIZE);
+    uint32_t current_addr = session.flash_addr;
+    pkt_out.data.flash_args.length = htonx<uint32_t>(N200_FLASH_DATA_PACKET_SIZE);
     for(size_t i = 0; i < ((session.size/N200_FLASH_DATA_PACKET_SIZE)+1); i++){
-        pkt_out.data.flash_args.flash_addr = htonx<boost::uint32_t>(current_addr);
+        pkt_out.data.flash_args.flash_addr = htonx<uint32_t>(current_addr);
         memset(pkt_out.data.flash_args.data, 0x0, N200_FLASH_DATA_PACKET_SIZE);
         image.read((char*)pkt_out.data.flash_args.data, N200_FLASH_DATA_PACKET_SIZE);
 
@@ -536,15 +492,15 @@ static void n200_verify_image(n200_session_t &session){
 
     // Read and verify image
     std::ifstream image(session.filepath.c_str(), std::ios::binary);
-    boost::uint8_t image_part[N200_FLASH_DATA_PACKET_SIZE];
-    boost::uint32_t current_addr = session.flash_addr;
-    pkt_out.data.flash_args.length = htonx<boost::uint32_t>(N200_FLASH_DATA_PACKET_SIZE);
-    boost::uint16_t cmp_len = 0;
+    uint8_t image_part[N200_FLASH_DATA_PACKET_SIZE];
+    uint32_t current_addr = session.flash_addr;
+    pkt_out.data.flash_args.length = htonx<uint32_t>(N200_FLASH_DATA_PACKET_SIZE);
+    uint16_t cmp_len = 0;
     for(size_t i = 0; i < ((session.size/N200_FLASH_DATA_PACKET_SIZE)+1); i++){
         memset(image_part, 0x0, N200_FLASH_DATA_PACKET_SIZE);
         memset((void*)pkt_in->data.flash_args.data, 0x0, N200_FLASH_DATA_PACKET_SIZE);
 
-        pkt_out.data.flash_args.flash_addr = htonx<boost::uint32_t>(current_addr);
+        pkt_out.data.flash_args.flash_addr = htonx<uint32_t>(current_addr);
         image.read((char*)image_part, N200_FLASH_DATA_PACKET_SIZE);
         cmp_len = image.gcount();
 

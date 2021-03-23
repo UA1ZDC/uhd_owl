@@ -1,18 +1,8 @@
 //
 // Copyright 2010-2012,2014-2015 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include "usrp2_regs.hpp"
@@ -20,14 +10,12 @@
 #include "fw_common.h"
 #include "usrp2_iface.hpp"
 #include <uhd/exception.hpp>
-#include <uhd/utils/msg.hpp>
+#include <uhd/utils/log.hpp>
 #include <uhd/utils/paths.hpp>
 #include <uhd/utils/tasks.hpp>
 #include <uhd/utils/paths.hpp>
 #include <uhd/utils/safe_call.hpp>
 #include <uhd/types/dict.hpp>
-#include <boost/thread.hpp>
-#include <boost/foreach.hpp>
 #include <boost/asio.hpp> //used for htonl and ntohl
 #include <boost/assign/list_of.hpp>
 #include <boost/format.hpp>
@@ -37,6 +25,8 @@
 #include <boost/filesystem.hpp>
 #include <algorithm>
 #include <iostream>
+#include <chrono>
+#include <thread>
 #include <uhd/utils/platform.hpp>
 
 using namespace uhd;
@@ -84,7 +74,7 @@ public:
             throw uhd::runtime_error("firmware not responding");
         _protocol_compat = ntohl(ctrl_data.proto_ver);
 
-        mb_eeprom = mboard_eeprom_t(*this, USRP2_EEPROM_MAP_KEY);
+        mb_eeprom = usrp2_impl::get_mb_eeprom(*this);
     }
 
     ~usrp2_iface_impl(void){UHD_SAFE_CALL(
@@ -129,7 +119,7 @@ public:
         //re-lock in task
         this->pokefw(U2_FW_REG_LOCK_TIME, this->get_curr_time());
         //sleep for a bit
-        boost::this_thread::sleep(boost::posix_time::milliseconds(1500));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     }
 
     uint32_t get_curr_time(void){
@@ -269,10 +259,10 @@ public:
                 return ctrl_send_and_recv_internal(out_data, lo, hi, CTRL_RECV_TIMEOUT/CTRL_RECV_RETRIES);
             }
             catch(const timeout_error &e){
-                UHD_MSG(error)
+                UHD_LOGGER_ERROR("USRP2")
                     << "Control packet attempt " << i
                     << ", sequence number " << _ctrl_seq_num
-                    << ":\n" << e.what() << std::endl;
+                    << ":\n" << e.what() ;
             }
         }
         throw uhd::runtime_error("link dead: timeout waiting for control packet ACK");
@@ -325,9 +315,6 @@ public:
         case 0x0A01: return USRP_N210;
         case 0x0A10: return USRP_N200_R4;
         case 0x0A11: return USRP_N210_R4;
-
-        case 0x0A21: return USRP_N210_XK;
-        case 0x0A20: return USRP_N210_XA;
         }
         return USRP_NXXX; //unknown type
     }
@@ -340,10 +327,6 @@ public:
         case USRP_N210: return "N210";
         case USRP_N200_R4: return "N200r4";
         case USRP_N210_R4: return "N210r4";
-
-        case USRP_N210_XK: return "N210_XK";
-        case USRP_N210_XA: return "N210_XA";
-
         case USRP_NXXX: return "N???";
         }
         UHD_THROW_INVALID_CODE_PATH();
@@ -364,8 +347,6 @@ public:
         case USRP_N210:    fpga_image = "usrp_n210_r2_fpga.bin"; fw_image = "usrp_n210_fw.bin"; break;
         case USRP_N200_R4: fpga_image = "usrp_n200_r4_fpga.bin"; fw_image = "usrp_n200_fw.bin"; break;
         case USRP_N210_R4: fpga_image = "usrp_n210_r4_fpga.bin"; fw_image = "usrp_n210_fw.bin"; break;
-
-        //case USRP_N210_XK: fpga_image = "usrp_n210_xk_fpga.bin"; fw_image = "usrp_n210_xk_fw.bin"; break;
         default: break;
         }
         if (fw_image.empty() or fpga_image.empty()) return "";

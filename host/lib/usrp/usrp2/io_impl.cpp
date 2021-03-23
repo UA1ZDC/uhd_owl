@@ -1,33 +1,23 @@
 //
 // Copyright 2010-2012 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-#include "validate_subdev_spec.hpp"
-#include "async_packet_handler.hpp"
+#include <uhdlib/usrp/common/validate_subdev_spec.hpp>
+#include <uhdlib/usrp/common/async_packet_handler.hpp>
 #include "../../transport/super_recv_packet_handler.hpp"
 #include "../../transport/super_send_packet_handler.hpp"
 #include "usrp2_impl.hpp"
 #include "usrp2_regs.hpp"
 #include "fw_common.h"
 #include <uhd/utils/log.hpp>
-#include <uhd/utils/msg.hpp>
+
 #include <uhd/utils/tasks.hpp>
 #include <uhd/exception.hpp>
 #include <uhd/utils/byteswap.hpp>
-#include <uhd/utils/thread_priority.hpp>
+#include <uhd/utils/thread.hpp>
 #include <uhd/transport/bounded_buffer.hpp>
 #include <boost/thread/thread.hpp>
 #include <boost/format.hpp>
@@ -36,6 +26,8 @@
 #include <boost/thread/mutex.hpp>
 #include <boost/make_shared.hpp>
 #include <iostream>
+#include <chrono>
+#include <thread>
 
 using namespace uhd;
 using namespace uhd::usrp;
@@ -165,7 +157,7 @@ struct usrp2_impl::io_impl{
     std::vector<flow_control_monitor::sptr> fc_mons;
 
     //methods and variables for the pirate crew
-    void recv_pirate_loop(zero_copy_if::sptr, size_t);
+    void recv_pirate_loop(zero_copy_if::sptr, size_t, const std::atomic<bool> &);
     std::list<task::sptr> pirate_tasks;
     bounded_buffer<async_metadata_t> async_msg_fifo;
     double tick_rate;
@@ -178,14 +170,14 @@ struct usrp2_impl::io_impl{
  * - put async message packets into queue
  **********************************************************************/
 void usrp2_impl::io_impl::recv_pirate_loop(
-    zero_copy_if::sptr err_xport, size_t index
+    zero_copy_if::sptr err_xport, size_t index, const std::atomic<bool> &exit_loop
 ){
     set_thread_priority_safe();
 
     //store a reference to the flow control monitor (offset by max dsps)
     flow_control_monitor &fc_mon = *(this->fc_mons[index]);
 
-    while (not boost::this_thread::interruption_requested()){
+    while (not exit_loop){
         managed_recv_buffer::sptr buff = err_xport->get_recv_buff();
         if (not buff.get()) continue; //ignore timeout/error buffers
 
@@ -209,7 +201,7 @@ void usrp2_impl::io_impl::recv_pirate_loop(
                     fc_mon.update_fc_condition(uhd::ntohx(fc_word32));
                     continue;
                 }
-                //else UHD_MSG(often) << "metadata.event_code " << metadata.event_code << std::endl;
+                //else UHD_LOGGER_DEBUG("USRP2") << "metadata.event_code " << metadata.event_code;
                 async_msg_fifo.push_with_pop_on_full(metadata);
 
                 standard_async_msg_prints(metadata);
@@ -218,7 +210,7 @@ void usrp2_impl::io_impl::recv_pirate_loop(
                 //TODO unknown received packet, may want to print error...
             }
         }catch(const std::exception &e){
-            UHD_MSG(error) << "Error in recv pirate loop: " << e.what() << std::endl;
+            UHD_LOGGER_ERROR("USRP2") << "Error in recv pirate loop: " << e.what() ;
         }
     }
 }
@@ -231,7 +223,7 @@ void usrp2_impl::io_init(void){
     _io_impl = UHD_PIMPL_MAKE(io_impl, ());
 
     //init first so we dont have an access race
-    BOOST_FOREACH(const std::string &mb, _mbc.keys()){
+    for(const std::string &mb:  _mbc.keys()){
         //init the tx xport and flow control monitor
         _io_impl->tx_xports.push_back(_mbc[mb].tx_dsp_xport);
         _io_impl->fc_mons.push_back(flow_control_monitor::sptr(new flow_control_monitor(
@@ -241,18 +233,19 @@ void usrp2_impl::io_init(void){
     }
 
     //allocate streamer weak ptrs containers
-    BOOST_FOREACH(const std::string &mb, _mbc.keys()){
+    for(const std::string &mb:  _mbc.keys()){
         _mbc[mb].rx_streamers.resize(_mbc[mb].rx_dsps.size());
         _mbc[mb].tx_streamers.resize(1/*known to be 1 dsp*/);
     }
 
     //create a new pirate thread for each zc if (yarr!!)
     size_t index = 0;
-    BOOST_FOREACH(const std::string &mb, _mbc.keys()){
+    for(const std::string &mb:  _mbc.keys()){
         //spawn a new pirate to plunder the recv booty
         _io_impl->pirate_tasks.push_back(task::make(boost::bind(
             &usrp2_impl::io_impl::recv_pirate_loop, _io_impl.get(),
-            _mbc[mb].tx_dsp_xport, index++
+            _mbc[mb].tx_dsp_xport, index++,
+            boost::ref(_pirate_task_exit)
         )));
     }
 }
@@ -261,7 +254,7 @@ void usrp2_impl::update_tick_rate(const double rate){
     _io_impl->tick_rate = rate; //shadow for async msg
 
     //update the tick rate on all existing streamers -> thread safe
-    BOOST_FOREACH(const std::string &mb, _mbc.keys()){
+    for(const std::string &mb:  _mbc.keys()){
         for (size_t i = 0; i < _mbc[mb].rx_streamers.size(); i++){
             boost::shared_ptr<sph::recv_packet_streamer> my_streamer =
                 boost::dynamic_pointer_cast<sph::recv_packet_streamer>(_mbc[mb].rx_streamers[i].lock());
@@ -298,15 +291,15 @@ void usrp2_impl::update_tx_samp_rate(const std::string &mb, const size_t dsp, co
 }
 
 void usrp2_impl::update_rates(void){
-    BOOST_FOREACH(const std::string &mb, _mbc.keys()){
+    for(const std::string &mb:  _mbc.keys()){
         fs_path root = "/mboards/" + mb;
         _tree->access<double>(root / "tick_rate").update();
 
         //and now that the tick rate is set, init the host rates to something
-        BOOST_FOREACH(const std::string &name, _tree->list(root / "rx_dsps")){
+        for(const std::string &name:  _tree->list(root / "rx_dsps")){
             _tree->access<double>(root / "rx_dsps" / name / "rate" / "value").update();
         }
-        BOOST_FOREACH(const std::string &name, _tree->list(root / "tx_dsps")){
+        for(const std::string &name:  _tree->list(root / "tx_dsps")){
             _tree->access<double>(root / "tx_dsps" / name / "rate" / "value").update();
         }
     }
@@ -330,7 +323,7 @@ void usrp2_impl::update_rx_subdev_spec(const std::string &which_mb, const subdev
     //compute the new occupancy and resize
     _mbc[which_mb].rx_chan_occ = spec.size();
     size_t nchan = 0;
-    BOOST_FOREACH(const std::string &mb, _mbc.keys()) nchan += _mbc[mb].rx_chan_occ;
+    for(const std::string &mb:  _mbc.keys()) nchan += _mbc[mb].rx_chan_occ;
 }
 
 void usrp2_impl::update_tx_subdev_spec(const std::string &which_mb, const subdev_spec_t &spec){
@@ -346,7 +339,7 @@ void usrp2_impl::update_tx_subdev_spec(const std::string &which_mb, const subdev
     //compute the new occupancy and resize
     _mbc[which_mb].tx_chan_occ = spec.size();
     size_t nchan = 0;
-    BOOST_FOREACH(const std::string &mb, _mbc.keys()) nchan += _mbc[mb].tx_chan_occ;
+    for(const std::string &mb:  _mbc.keys()) nchan += _mbc[mb].tx_chan_occ;
 }
 
 /***********************************************************************
@@ -375,10 +368,10 @@ void usrp2_impl::program_stream_dest(
 
     //user has provided an alternative address and port for destination
     if (args.args.has_key("addr") and args.args.has_key("port")){
-        UHD_MSG(status) << boost::format(
-            "Programming streaming destination for custom address.\n"
-            "IPv4 Address: %s, UDP Port: %s\n"
-        ) % args.args["addr"] % args.args["port"] << std::endl;
+        UHD_LOGGER_INFO("USRP2") << boost::format(
+            "Programming streaming destination for custom address. "
+            "IPv4 Address: %s, UDP Port: %s"
+            ) % args.args["addr"] % args.args["port"];
 
         asio::io_service io_service;
         asio::ip::udp::resolver resolver(io_service);
@@ -388,17 +381,17 @@ void usrp2_impl::program_stream_dest(
         stream_ctrl.udp_port = uhd::htonx(uint32_t(endpoint.port()));
 
         for (size_t i = 0; i < 3; i++){
-            UHD_MSG(status) << "ARP attempt " << i << std::endl;
+            UHD_LOGGER_INFO("USRP2") << "ARP attempt " << i;
             managed_send_buffer::sptr send_buff = xport->get_send_buff();
             std::memcpy(send_buff->cast<void *>(), &stream_ctrl, sizeof(stream_ctrl));
             send_buff->commit(sizeof(stream_ctrl));
             send_buff.reset();
-            boost::this_thread::sleep(boost::posix_time::milliseconds(300));
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
             managed_recv_buffer::sptr recv_buff = xport->get_recv_buff(0.0);
             if (recv_buff and recv_buff->size() >= sizeof(uint32_t)){
                 const uint32_t result = uhd::ntohx(recv_buff->cast<const uint32_t *>()[0]);
                 if (result == 0){
-                    UHD_MSG(status) << "Success! " << std::endl;
+                    UHD_LOGGER_INFO("USRP2") << "Success! ";
                     return;
                 }
             }
@@ -454,7 +447,7 @@ rx_streamer::sptr usrp2_impl::get_rx_stream(const uhd::stream_args_t &args_){
     for (size_t chan_i = 0; chan_i < args.channels.size(); chan_i++){
         const size_t chan = args.channels[chan_i];
         size_t num_chan_so_far = 0;
-        BOOST_FOREACH(const std::string &mb, _mbc.keys()){
+        for(const std::string &mb:  _mbc.keys()){
             num_chan_so_far += _mbc[mb].rx_chan_occ;
             if (chan < num_chan_so_far){
                 const size_t dsp = chan + _mbc[mb].rx_chan_occ - num_chan_so_far;
@@ -524,7 +517,7 @@ tx_streamer::sptr usrp2_impl::get_tx_stream(const uhd::stream_args_t &args_){
         const size_t chan = args.channels[chan_i];
         size_t num_chan_so_far = 0;
         size_t abs = 0;
-        BOOST_FOREACH(const std::string &mb, _mbc.keys()){
+        for(const std::string &mb:  _mbc.keys()){
             num_chan_so_far += _mbc[mb].tx_chan_occ;
             if (chan < num_chan_so_far){
                 const size_t dsp = chan + _mbc[mb].tx_chan_occ - num_chan_so_far;
