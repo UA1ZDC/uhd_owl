@@ -16,10 +16,10 @@
 #
 
 ########################################################################
-SET(COMMON_SRCS
+set(COMMON_SRCS
     ${CMAKE_SOURCE_DIR}/lib/u2_init.c
     ${CMAKE_SOURCE_DIR}/lib/abort.c
-    ${CMAKE_SOURCE_DIR}/lib/ad9516.c
+    ${CMAKE_SOURCE_DIR}/lib/ad9510.c
     ${CMAKE_SOURCE_DIR}/lib/clocks.c
     ${CMAKE_SOURCE_DIR}/lib/eeprom.c
     ${CMAKE_SOURCE_DIR}/lib/eth_addrs.c
@@ -45,5 +45,4 @@ SET(COMMON_SRCS
     ${CMAKE_SOURCE_DIR}/lib/arp_cache.c
     ${CMAKE_SOURCE_DIR}/lib/banal.c
     ${CMAKE_SOURCE_DIR}/lib/udp_uart.c
-    ${CMAKE_SOURCE_DIR}/lib/ltc2185.c
 )

@@ -1,23 +1,14 @@
 //
 // Copyright 2014 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-#include <boost/format.hpp>
 #include <uhd/device3.hpp>
-#include <uhd/utils/msg.hpp>
+#include <uhd/utils/log.hpp>
+#include <boost/format.hpp>
+#include <boost/thread/lock_guard.hpp>
 
 using namespace uhd;
 using namespace uhd::rfnoc;
@@ -68,7 +59,8 @@ std::vector<rfnoc::block_id_t> device3::find_blocks(const std::string &block_id_
 
 void device3::clear()
 {
-    BOOST_FOREACH(const block_ctrl_base::sptr &block, _rfnoc_block_ctrl) {
+    boost::lock_guard<boost::mutex> lock(_block_ctrl_mutex);
+    for(const block_ctrl_base::sptr &block:  _rfnoc_block_ctrl) {
         block->clear();
     }
 }

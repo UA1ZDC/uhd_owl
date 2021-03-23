@@ -50,7 +50,6 @@
 /////////////////////////////////////////////////////
 
 // Masks for controlling different peripherals
-#define SPI_SS_AD9516    1
 #define SPI_SS_AD9510    1
 #define SPI_SS_AD9777    2
 #define SPI_SS_RX_DAC    4
@@ -60,7 +59,6 @@
 #define SPI_SS_TX_ADC   64
 #define SPI_SS_TX_DB   128
 #define SPI_SS_ADS62P44 256
-#define	SPI_SS_LTC2184	256
 
 // Masks for different parts of CTRL reg
 #define SPI_CTRL_ASS      (1<<13)
@@ -255,7 +253,6 @@ typedef struct {
   volatile uint32_t debug_mux_ctrl;
   volatile uint32_t led_src;         // HW or SW control for LEDs
   volatile uint32_t flush_icache;    // Flush the icache
-  volatile uint32_t	dac_ctrl;
 } output_regs_t;
 
 #define CLK_RESET  (1<<4)

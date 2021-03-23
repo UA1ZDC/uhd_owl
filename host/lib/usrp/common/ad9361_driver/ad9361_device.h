@@ -1,34 +1,23 @@
 //
 // Copyright 2014 Ettus Research
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #ifndef INCLUDED_AD9361_DEVICE_H
 #define INCLUDED_AD9361_DEVICE_H
 
 #include <ad9361_client.h>
-#include <boost/noncopyable.hpp>
-#include <boost/thread/recursive_mutex.hpp>
 #include <uhd/types/filters.hpp>
 #include <uhd/types/sensors.hpp>
+#include <boost/noncopyable.hpp>
 #include <complex>
 #include <vector>
 #include <map>
-#include "boost/assign.hpp"
-#include "boost/bind.hpp"
-#include "boost/function.hpp"
+#include <tuple>
+#include <functional>
+#include <mutex>
 
 namespace uhd { namespace usrp {
 
@@ -38,38 +27,132 @@ public:
     enum direction_t { RX, TX };
     enum gain_mode_t {GAIN_MODE_MANUAL, GAIN_MODE_SLOW_AGC, GAIN_MODE_FAST_AGC};
     enum chain_t { CHAIN_1, CHAIN_2, CHAIN_BOTH };
+    enum timing_mode_t { TIMING_MODE_1R1T, TIMING_MODE_2R2T };
 
     ad9361_device_t(ad9361_params::sptr client, ad9361_io::sptr io_iface) :
-        _client_params(client), _io_iface(io_iface) {
-
-        /*
-         * This Boost.Assign to_container() workaround is necessary because STL containers
-         * apparently confuse newer versions of MSVC.
-         *
-         * Source: http://www.boost.org/doc/libs/1_55_0/libs/assign/doc/#portability
-         */
-
-        _rx_filters = (boost::assign::map_list_of("LPF_TIA", filter_query_helper(boost::bind(&ad9361_device_t::_get_filter_lp_tia_sec, this, _1),
-                                                    boost::bind(&ad9361_device_t::_set_filter_lp_tia_sec, this, _1, _3)))
-                                            ("LPF_BB", filter_query_helper(boost::bind(&ad9361_device_t::_get_filter_lp_bb, this, _1),
-                                                    boost::bind(&ad9361_device_t::_set_filter_lp_bb, this, _1, _3)))
-                                            ("HB_3", filter_query_helper(boost::bind(&ad9361_device_t::_get_filter_hb_3, this, _1), 0))
-                                            ("DEC_3", filter_query_helper(boost::bind(&ad9361_device_t::_get_filter_dec_int_3, this, _1), 0))
-                                            ("HB_2", filter_query_helper(boost::bind(&ad9361_device_t::_get_filter_hb_2, this, _1), 0))
-                                            ("HB_1", filter_query_helper(boost::bind(&ad9361_device_t::_get_filter_hb_1, this, _1), 0))
-                                            ("FIR_1", filter_query_helper(boost::bind(&ad9361_device_t::_get_filter_fir, this, _1, _2),
-                                                    boost::bind(&ad9361_device_t::_set_filter_fir, this, _1, _2, _3)))).to_container(_rx_filters);
-
-        _tx_filters = (boost::assign::map_list_of("LPF_SECONDARY", filter_query_helper(boost::bind(&ad9361_device_t::_get_filter_lp_tia_sec, this, _1),
-                                                    boost::bind(&ad9361_device_t::_set_filter_lp_tia_sec, this, _1, _3)))
-                                            ("LPF_BB", filter_query_helper(boost::bind(&ad9361_device_t::_get_filter_lp_bb, this, _1),
-                                                    boost::bind(&ad9361_device_t::_set_filter_lp_bb, this, _1, _3)))
-                                            ("HB_3", filter_query_helper(boost::bind(&ad9361_device_t::_get_filter_hb_3, this, _1), 0))
-                                            ("INT_3", filter_query_helper(boost::bind(&ad9361_device_t::_get_filter_dec_int_3, this, _1), 0))
-                                            ("HB_2", filter_query_helper(boost::bind(&ad9361_device_t::_get_filter_hb_2, this, _1), 0))
-                                            ("HB_1", filter_query_helper(boost::bind(&ad9361_device_t::_get_filter_hb_1, this, _1), 0))
-                                            ("FIR_1", filter_query_helper(boost::bind(&ad9361_device_t::_get_filter_fir, this, _1, _2),
-                                                    boost::bind(&ad9361_device_t::_set_filter_fir, this, _1, _2, _3)))).to_container(_tx_filters);
+        _client_params(client), _io_iface(io_iface),
+        _bbpll_freq(0.0), _adcclock_freq(0.0), _req_clock_rate(0.0),
+        _req_coreclk(0.0), _rx_bbf_tunediv(0), _curr_gain_table(0),
+        _rx1_gain(0.0), _rx2_gain(0.0), _tx1_gain(0.0), _tx2_gain(0.0),
+        _tfir_factor(0), _rfir_factor(0),
+        _rx1_agc_mode(GAIN_MODE_MANUAL), _rx2_agc_mode(GAIN_MODE_MANUAL),
+        _rx1_agc_enable(false), _rx2_agc_enable(false),
+        _use_dc_offset_tracking(false), _use_iq_balance_tracking(false),
+        _rx_filters{
+            {"LPF_TIA", std::make_tuple(
+                    [this](const chain_t){
+                        return this->_get_filter_lp_tia_sec(RX);
+                    },
+                    [this](const chain_t, filter_info_base::sptr filter_info){
+                        this->_set_filter_lp_tia_sec(RX, filter_info);
+                    }
+                )
+            },
+            {"LPF_BB", std::make_tuple(
+                    [this](const chain_t){
+                        return this->_get_filter_lp_bb(RX);
+                    },
+                    [this](const chain_t, filter_info_base::sptr filter_info){
+                        this->_set_filter_lp_bb(RX, filter_info);
+                    }
+                )
+            },
+            {"HB_3", std::make_tuple(
+                    [this](const chain_t){
+                        return this->_get_filter_hb_3(RX);
+                    },
+                    nullptr
+                )
+            },
+            {"DEC_3", std::make_tuple(
+                    [this](const chain_t){
+                        return this->_get_filter_dec_int_3(RX);
+                    },
+                    nullptr
+                )
+            },
+            {"HB_2", std::make_tuple(
+                    [this](const chain_t){
+                        return this->_get_filter_hb_2(RX);
+                    },
+                    nullptr
+                )
+            },
+            {"HB_1", std::make_tuple(
+                    [this](const chain_t){
+                        return this->_get_filter_hb_1(RX);
+                    },
+                    nullptr
+                )
+            },
+            {"FIR_1", std::make_tuple(
+                    [this](const chain_t channel){
+                        return this->_get_filter_fir(RX, channel);
+                    },
+                    [this](const chain_t channel, filter_info_base::sptr filter_info){
+                        this->_set_filter_fir(RX, channel, filter_info);
+                    }
+                )
+            }
+        },
+        _tx_filters{
+            {"LPF_SECONDARY", std::make_tuple(
+                    [this](const chain_t){
+                        return this->_get_filter_lp_tia_sec(TX);
+                    },
+                    [this](const chain_t, filter_info_base::sptr filter_info){
+                        this->_set_filter_lp_tia_sec(TX, filter_info);
+                    }
+                )
+            },
+            {"LPF_BB", std::make_tuple(
+                    [this](const chain_t){
+                        return this->_get_filter_lp_bb(TX);
+                    },
+                    [this](const chain_t, filter_info_base::sptr filter_info){
+                        this->_set_filter_lp_bb(TX, filter_info);
+                    }
+                )
+            },
+            {"HB_3", std::make_tuple(
+                    [this](const chain_t){
+                        return this->_get_filter_hb_3(TX);
+                    },
+                    nullptr
+                )
+            },
+            {"INT_3", std::make_tuple(
+                    [this](const chain_t){
+                        return this->_get_filter_dec_int_3(TX);
+                    },
+                    nullptr
+                )
+            },
+            {"HB_2", std::make_tuple(
+                    [this](const chain_t){
+                        return this->_get_filter_hb_2(TX);
+                    },
+                    nullptr
+                )
+            },
+            {"HB_1", std::make_tuple(
+                    [this](const chain_t){
+                        return this->_get_filter_hb_1(TX);
+                    },
+                    nullptr
+                )
+            },
+            {"FIR_1", std::make_tuple(
+                    [this](const chain_t channel){
+                        return this->_get_filter_fir(TX, channel);
+                    },
+                    [this](const chain_t channel, filter_info_base::sptr filter_info){
+                        this->_set_filter_fir(TX, channel, filter_info);
+                    }
+                )
+            },
+        }
+    {
     }
 
     /* Initialize the AD9361 codec. */
@@ -77,6 +160,9 @@ public:
 
     /* Set SPI interface */
     void set_io_iface(ad9361_io::sptr io_iface);
+
+    /* Get the current clock rate. */
+    double get_clock_rate();
 
     /* This function sets the RX / TX rate between AD9361 and the FPGA, and
      * thus determines the interpolation / decimation required in the FPGA to
@@ -94,6 +180,12 @@ public:
      *
      */
     void set_active_chains(bool tx1, bool tx2, bool rx1, bool rx2);
+
+    /* Setup Timing mode depending on active channels.
+     *
+     * LVDS interface can have two timing modes - 1R1T and 2R2T
+     */
+    void set_timing_mode(const timing_mode_t timing_mode);
 
     /* Tune the RX or TX frequency.
      *
@@ -162,15 +254,16 @@ public:
     static const double AD9361_MAX_CLOCK_RATE;
     static const double AD9361_MIN_CLOCK_RATE;
     static const double AD9361_CAL_VALID_WINDOW;
-    static const double AD9361_RECOMMENDED_MAX_BANDWIDTH;
+    static const double AD9361_MIN_BW;
+    static const double AD9361_MAX_BW;
     static const double DEFAULT_RX_FREQ;
     static const double DEFAULT_TX_FREQ;
 
 private:    //Methods
-    void _program_fir_filter(direction_t direction, int num_taps, boost::uint16_t *coeffs);
-    void _setup_tx_fir(size_t num_taps, boost::int32_t interpolation);
-    void _setup_rx_fir(size_t num_taps, boost::int32_t decimation);
-    void _program_fir_filter(direction_t direction, chain_t chain, int num_taps, boost::uint16_t *coeffs);
+    void _program_fir_filter(direction_t direction, int num_taps, uint16_t *coeffs);
+    void _setup_tx_fir(size_t num_taps, int32_t interpolation);
+    void _setup_rx_fir(size_t num_taps, int32_t decimation);
+    void _program_fir_filter(direction_t direction, chain_t chain, int num_taps, uint16_t *coeffs);
     void _setup_tx_fir(size_t num_taps);
     void _setup_rx_fir(size_t num_taps);
     void _calibrate_lock_bbpll();
@@ -197,8 +290,8 @@ private:    //Methods
     void _configure_bb_dc_tracking();
     void _configure_rx_iq_tracking();
     void _setup_agc(chain_t chain, gain_mode_t gain_mode);
-    void _set_fir_taps(direction_t direction, chain_t chain, const std::vector<boost::int16_t>& taps);
-    std::vector<boost::int16_t> _get_fir_taps(direction_t direction, chain_t chain);
+    void _set_fir_taps(direction_t direction, chain_t chain, const std::vector<int16_t>& taps);
+    std::vector<int16_t> _get_fir_taps(direction_t direction, chain_t chain);
     size_t _get_num_fir_taps(direction_t direction);
     size_t _get_fir_dec_int(direction_t direction);
     filter_info_base::sptr _get_filter_lp_tia_sec(direction_t direction);
@@ -213,31 +306,19 @@ private:    //Methods
     void _set_filter_lp_tia_sec(direction_t direction, filter_info_base::sptr filter);
 
 private:    //Members
-    typedef struct {
-        boost::uint8_t vcodivs;
-        boost::uint8_t inputsel;
-        boost::uint8_t rxfilt;
-        boost::uint8_t txfilt;
-        boost::uint8_t bbpll;
-        boost::uint8_t bbftune_config;
-        boost::uint8_t bbftune_mode;
-    } chip_regs_t;
-
-    struct filter_query_helper
+    struct chip_regs_t
     {
-        filter_query_helper(
-                boost::function<filter_info_base::sptr (direction_t, chain_t)> p_get,
-                boost::function<void (direction_t, chain_t, filter_info_base::sptr)> p_set
-                ) : get(p_get), set(p_set) {  }
-
-        filter_query_helper(){ }
-
-        boost::function<filter_info_base::sptr (direction_t, chain_t)> get;
-        boost::function<void (direction_t, chain_t, filter_info_base::sptr)> set;
+        chip_regs_t():
+            vcodivs(0), inputsel(0), rxfilt(0), txfilt(0),
+            bbpll(0), bbftune_config(0), bbftune_mode(0) {}
+        uint8_t vcodivs;
+        uint8_t inputsel;
+        uint8_t rxfilt;
+        uint8_t txfilt;
+        uint8_t bbpll;
+        uint8_t bbftune_config;
+        uint8_t bbftune_mode;
     };
-
-    std::map<std::string, filter_query_helper> _rx_filters;
-    std::map<std::string, filter_query_helper> _tx_filters;
 
     //Interfaces
     ad9361_params::sptr _client_params;
@@ -256,19 +337,28 @@ private:    //Members
     //  if another call to set_clock_rate() actually has the same value.
     double              _req_clock_rate;
     double              _req_coreclk;
-    boost::uint16_t     _rx_bbf_tunediv;
-    boost::uint8_t      _curr_gain_table;
+    uint16_t     _rx_bbf_tunediv;
+    uint8_t      _curr_gain_table;
     double              _rx1_gain, _rx2_gain, _tx1_gain, _tx2_gain;
-    boost::int32_t      _tfir_factor;
-    boost::int32_t      _rfir_factor;
+    int32_t      _tfir_factor;
+    int32_t      _rfir_factor;
     gain_mode_t         _rx1_agc_mode, _rx2_agc_mode;
     bool                _rx1_agc_enable, _rx2_agc_enable;
     //Register soft-copies
     chip_regs_t         _regs;
     //Synchronization
-    boost::recursive_mutex  _mutex;
+    std::recursive_mutex  _mutex;
     bool _use_dc_offset_tracking;
     bool _use_iq_balance_tracking;
+
+    // Filter API
+    using filter_tuple = std::tuple<
+        std::function<filter_info_base::sptr(const chain_t)>, // getter
+        std::function<void(chain_t, filter_info_base::sptr)>  // setter
+    >;
+    std::map<std::string, filter_tuple> _rx_filters;
+    std::map<std::string, filter_tuple> _tx_filters;
+
 };
 
 }}  //namespace

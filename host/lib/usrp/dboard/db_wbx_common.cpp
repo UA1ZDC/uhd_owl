@@ -1,18 +1,8 @@
 //
 // Copyright 2011-2014 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include "db_wbx_common.hpp"
@@ -21,7 +11,7 @@
 #include <uhd/types/sensors.hpp>
 #include <uhd/utils/assert_has.hpp>
 #include <uhd/utils/algorithm.hpp>
-#include <uhd/utils/msg.hpp>
+#include <uhd/utils/log.hpp>
 
 using namespace uhd;
 using namespace uhd::usrp;
@@ -42,9 +32,9 @@ static int rx_pga0_gain_to_iobits(double &gain){
     int attn_code = boost::math::iround(attn*2);
     int iobits = ((~attn_code) << RX_ATTN_SHIFT) & RX_ATTN_MASK;
 
-    UHD_LOGV(often) << boost::format(
+    UHD_LOGGER_TRACE("WBX") << boost::format(
         "WBX RX Attenuation: %f dB, Code: %d, IO Bits %x, Mask: %x"
-    ) % attn % attn_code % (iobits & RX_ATTN_MASK) % RX_ATTN_MASK << std::endl;
+    ) % attn % attn_code % (iobits & RX_ATTN_MASK) % RX_ATTN_MASK ;
 
     //the actual gain setting
     gain = wbx_rx_gain_ranges["PGA0"].stop() - double(attn_code)/2;
@@ -65,12 +55,12 @@ wbx_base::wbx_base(ctor_args_t args) : xcvr_dboard_base(args){
     ////////////////////////////////////////////////////////////////////
     // Register RX and TX properties
     ////////////////////////////////////////////////////////////////////
-    boost::uint16_t rx_id = this->get_rx_id().to_uint16();
+    uint16_t rx_id = this->get_rx_id().to_uint16();
 
     this->get_rx_subtree()->create<device_addr_t>("tune_args").set(device_addr_t());
     this->get_rx_subtree()->create<sensor_value_t>("sensors/lo_locked")
         .set_publisher(boost::bind(&wbx_base::get_locked, this, dboard_iface::UNIT_RX));
-    BOOST_FOREACH(const std::string &name, wbx_rx_gain_ranges.keys()){
+    for(const std::string &name:  wbx_rx_gain_ranges.keys()){
         this->get_rx_subtree()->create<double>("gains/"+name+"/value")
             .set_coercer(boost::bind(&wbx_base::set_rx_gain, this, _1, name))
             .set(wbx_rx_gain_ranges[name].start());
@@ -139,7 +129,7 @@ void wbx_base::set_rx_enabled(bool enb){
 double wbx_base::set_rx_gain(double gain, const std::string &name){
     assert_has(wbx_rx_gain_ranges.keys(), name, "wbx rx gain name");
     if(name == "PGA0"){
-        boost::uint16_t io_bits = rx_pga0_gain_to_iobits(gain);
+        uint16_t io_bits = rx_pga0_gain_to_iobits(gain);
         _rx_gains[name] = gain;
 
         //write the new gain to rx gpio outputs
@@ -157,8 +147,8 @@ sensor_value_t wbx_base::get_locked(dboard_iface::unit_t unit){
     return sensor_value_t("LO", locked, "locked", "unlocked");
 }
 
-void wbx_base::wbx_versionx::write_lo_regs(dboard_iface::unit_t unit, const std::vector<boost::uint32_t> &regs) {
-    BOOST_FOREACH(boost::uint32_t reg, regs) {
+void wbx_base::wbx_versionx::write_lo_regs(dboard_iface::unit_t unit, const std::vector<uint32_t> &regs) {
+    for(uint32_t reg:  regs) {
         self_base->get_iface()->write_spi(unit, spi_config_t::EDGE_RISE, reg, 32);
     }
 }

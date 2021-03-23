@@ -1,26 +1,16 @@
 //
 // Copyright 2014 Ettus Research
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #ifndef INCLUDED_AD9361_GAIN_TABLES_HPP
 #define INCLUDED_AD9361_GAIN_TABLES_HPP
 
-#include <boost/cstdint.hpp>
+#include <stdint.h>
 
-boost::uint8_t gain_table_sub_1300mhz[77][3] = {
+uint8_t gain_table_sub_1300mhz[77][3] = {
 { 0x00, 0x00, 0x20 }, { 0x00, 0x00, 0x00 }, { 0x00, 0x00, 0x00 },
 { 0x00, 0x01, 0x00 }, { 0x00, 0x02, 0x00 }, { 0x00, 0x03, 0x00 },
 { 0x00, 0x04, 0x00 }, { 0x00, 0x05, 0x00 }, { 0x01, 0x03, 0x20 },
@@ -49,7 +39,7 @@ boost::uint8_t gain_table_sub_1300mhz[77][3] = {
 { 0x6E, 0x38, 0x20 }, { 0x6F, 0x38, 0x20 } };
 
 
-boost::uint8_t gain_table_1300mhz_to_4000mhz[77][3] = {
+uint8_t gain_table_1300mhz_to_4000mhz[77][3] = {
 { 0x00, 0x00, 0x20 }, { 0x00, 0x00, 0x00 }, { 0x00, 0x00, 0x00 },
 { 0x00, 0x01, 0x00 }, { 0x00, 0x02, 0x00 }, { 0x00, 0x03, 0x00 },
 { 0x00, 0x04, 0x00 }, { 0x00, 0x05, 0x00 }, { 0x01, 0x03, 0x20 },
@@ -78,7 +68,7 @@ boost::uint8_t gain_table_1300mhz_to_4000mhz[77][3] = {
 { 0x6E, 0x38, 0x20 }, { 0x6F, 0x38, 0x20 } };
 
 
-boost::uint8_t gain_table_4000mhz_to_6000mhz[77][3] = {
+uint8_t gain_table_4000mhz_to_6000mhz[77][3] = {
 { 0x00, 0x00, 0x20 }, { 0x00, 0x00, 0x00 }, { 0x00, 0x00, 0x00 },
 { 0x00, 0x00, 0x00 }, { 0x00, 0x00, 0x00 }, { 0x00, 0x01, 0x00 },
 { 0x00, 0x02, 0x00 }, { 0x00, 0x03, 0x00 }, { 0x01, 0x01, 0x20 },

@@ -1,19 +1,9 @@
 #!/usr/bin/env python
 #
 # Copyright 2015-2016 Ettus Research LLC
+# Copyright 2018 Ettus Research, a National Instruments Company
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 """
 Device test runner.
@@ -45,14 +35,16 @@ def setup_env(args):
         env['PATH'] = "{build_dir}/lib/{build_type};" + \
                       "{build_dir}/examples/{build_type};" + \
                       "{build_dir}/utils/{build_type};{path}".format(
-            build_dir=build_dir, build_type=build_type, path=env.get('PATH', '')
-        )
+                          build_dir=build_dir,
+                          build_type=build_type,
+                          path=env.get('PATH', ''))
         env['LIBPATH'] = "{build_dir}/lib/{build_type};{path}".format(
             build_dir=build_dir, build_type=build_type, path=env.get('LIBPATH', '')
         )
         env['LIB'] = "{build_dir}/lib/{build_type};{path}".format(
             build_dir=build_dir, build_type=build_type, path=env.get('LIB', '')
         )
+        env['PYTHONPATH'] = "{build_dir}/python".format(build_dir=build_dir)
         return env
     def setup_env_unix(env, build_dir):
         " Add build dir into paths (Unices)"
@@ -62,15 +54,17 @@ def setup_env(args):
         env['LD_LIBRARY_PATH'] = "{build_dir}/lib:{path}".format(
             build_dir=build_dir, path=env.get('LD_LIBRARY_PATH', '')
         )
+        env['PYTHONPATH'] = "{build_dir}/python".format(build_dir=build_dir)
         return env
     def setup_env_osx(env, build_dir):
         " Add build dir into paths (OS X)"
         env['PATH'] = "{build_dir}/examples:{build_dir}/utils:{path}".format(
-                build_dir=build_dir, path=env.get('PATH', '')
+            build_dir=build_dir, path=env.get('PATH', '')
         )
         env['DYLD_LIBRARY_PATH'] = "{build_dir}/lib:{path}".format(
-                build_dir=build_dir, path=env.get('DYLD_LIBRARY_PATH', '')
+            build_dir=build_dir, path=env.get('DYLD_LIBRARY_PATH', '')
         )
+        env['PYTHONPATH'] = "{build_dir}/python".format(build_dir=build_dir)
         return env
     ### Go
     env = os.environ
@@ -81,7 +75,8 @@ def setup_env(args):
     elif sys.platform.startswith('darwin'):
         env = setup_env_osx(env, args.build_dir)
     else:
-        print("Devtest not supported on this platform ({0}).".format(sys.platform))
+        print("Devtest not supported on this platform ({0})."
+              .format(sys.platform))
         exit(1)
     return env
 
@@ -102,6 +97,7 @@ def main():
             ser=uhd_info.get('serial')
         ))
         print('--- This will take some time. Better grab a cup of tea.')
+        sys.stdout.flush()
         args_str = uhd_info['args']
         env['_UHD_TEST_ARGS_STR'] = args_str
         logfile_name = "log{}.log".format(
@@ -114,6 +110,8 @@ def main():
         env['_UHD_TEST_RESULTSFILE'] = os.path.join(args.log_dir, resultsfile_name)
         env['_UHD_TEST_LOG_LEVEL'] = str(logging.INFO)
         env['_UHD_TEST_PRINT_LEVEL'] = str(logging.WARNING)
+        env['_UHD_BUILD_DIR'] = str(args.build_dir)
+        env['_UHD_DEVTEST_SRC_DIR'] = str(args.src_dir)
         proc = subprocess.Popen(
             [
                 "python", "-m", "unittest", "discover", "-v",
@@ -121,9 +119,13 @@ def main():
                 "-p", devtest_pattern,
             ],
             env=env,
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True
         )
         print(proc.communicate()[0])
+        sys.stdout.flush()
         if proc.returncode != 0:
             tests_passed = False
     print('--- Done testing all attached devices.')

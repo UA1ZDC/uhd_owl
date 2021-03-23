@@ -1,23 +1,13 @@
 //
 // Copyright 2013-2014,2016 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include "n230_frontend_ctrl.hpp"
 
-#include <uhd/utils/msg.hpp>
+#include <uhd/utils/log.hpp>
 #include <uhd/exception.hpp>
 #include <uhd/types/dict.hpp>
 #include <boost/format.hpp>
@@ -27,29 +17,29 @@
 namespace uhd { namespace usrp { namespace n230 {
 
 /* ATR Control Bits */
-static const boost::uint32_t TX_ENABLE      = (1 << 7);
-static const boost::uint32_t SFDX_RX        = (1 << 6);
-static const boost::uint32_t SFDX_TX        = (1 << 5);
-static const boost::uint32_t SRX_RX         = (1 << 4);
-static const boost::uint32_t SRX_TX         = (1 << 3);
-static const boost::uint32_t LED_RX         = (1 << 2);
-static const boost::uint32_t LED_TXRX_RX    = (1 << 1);
-static const boost::uint32_t LED_TXRX_TX    = (1 << 0);
+static const uint32_t TX_ENABLE      = (1 << 7);
+static const uint32_t SFDX_RX        = (1 << 6);
+static const uint32_t SFDX_TX        = (1 << 5);
+static const uint32_t SRX_RX         = (1 << 4);
+static const uint32_t SRX_TX         = (1 << 3);
+static const uint32_t LED_RX         = (1 << 2);
+static const uint32_t LED_TXRX_RX    = (1 << 1);
+static const uint32_t LED_TXRX_TX    = (1 << 0);
 
 /* ATR State Definitions. */
-static const boost::uint32_t STATE_OFF      = 0x00;
-static const boost::uint32_t STATE_RX_RX2   = (SFDX_RX
+static const uint32_t STATE_OFF      = 0x00;
+static const uint32_t STATE_RX_RX2   = (SFDX_RX
                                                 | SFDX_TX
                                                 | LED_RX);
-static const boost::uint32_t STATE_RX_TXRX  = (SRX_RX
+static const uint32_t STATE_RX_TXRX  = (SRX_RX
                                                 | SRX_TX
                                                 | LED_TXRX_RX);
-static const boost::uint32_t STATE_FDX_TXRX = (TX_ENABLE
+static const uint32_t STATE_FDX_TXRX = (TX_ENABLE
                                                 | SFDX_RX
                                                 | SFDX_TX
                                                 | LED_TXRX_TX
                                                 | LED_RX);
-static const boost::uint32_t STATE_TX_TXRX  = (TX_ENABLE
+static const uint32_t STATE_TX_TXRX  = (TX_ENABLE
                                                 | SFDX_RX
                                                 | SFDX_TX
                                                 | LED_TXRX_TX);

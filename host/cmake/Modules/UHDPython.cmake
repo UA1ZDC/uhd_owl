@@ -1,65 +1,79 @@
 #
 # Copyright 2010-2011 Ettus Research LLC
+# Copyright 2018 Ettus Research, a National Instruments Company
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 
-IF(NOT DEFINED INCLUDED_UHD_PYTHON_CMAKE)
-SET(INCLUDED_UHD_PYTHON_CMAKE TRUE)
+if(NOT DEFINED INCLUDED_UHD_PYTHON_CMAKE)
+set(INCLUDED_UHD_PYTHON_CMAKE TRUE)
 
 ########################################################################
 # Setup Python
 ########################################################################
-MESSAGE(STATUS "")
-MESSAGE(STATUS "Configuring the python interpreter...")
+message(STATUS "")
+message(STATUS "Configuring the python interpreter...")
 #this allows the user to override PYTHON_EXECUTABLE
-IF(PYTHON_EXECUTABLE)
+if(PYTHON_EXECUTABLE)
 
-    SET(PYTHONINTERP_FOUND TRUE)
+    set(PYTHONINTERP_FOUND TRUE)
 
 #otherwise if not set, try to automatically find it
-ELSE(PYTHON_EXECUTABLE)
+else(PYTHON_EXECUTABLE)
 
     #use the built-in find script
-    FIND_PACKAGE(PythonInterp)
+    if(ENABLE_PYTHON3)
+        find_package(PythonInterp 3.0)
+    else(ENABLE_PYTHON3)
+        find_package(PythonInterp 2.0)
+    endif(ENABLE_PYTHON3)
 
     #and if that fails use the find program routine
-    IF(NOT PYTHONINTERP_FOUND)
-        FIND_PROGRAM(PYTHON_EXECUTABLE NAMES python python2.7 python2.6)
-        IF(PYTHON_EXECUTABLE)
-            SET(PYTHONINTERP_FOUND TRUE)
-        ENDIF(PYTHON_EXECUTABLE)
-    ENDIF(NOT PYTHONINTERP_FOUND)
+    if(NOT PYTHONINTERP_FOUND)
+        if(ENABLE_PYTHON3)
+            find_program(PYTHON_EXECUTABLE NAMES python3 python3.5 python3.6)
+        else(ENABLE_PYTHON3)
+            find_program(PYTHON_EXECUTABLE NAMES python2 python2.7)
+        endif(ENABLE_PYTHON3)
 
-ENDIF(PYTHON_EXECUTABLE)
+        if(PYTHON_EXECUTABLE)
+            set(PYTHONINTERP_FOUND TRUE)
+        endif(PYTHON_EXECUTABLE)
+    endif(NOT PYTHONINTERP_FOUND)
+
+endif(PYTHON_EXECUTABLE)
 
 #make the path to the executable appear in the cmake gui
-SET(PYTHON_EXECUTABLE ${PYTHON_EXECUTABLE} CACHE FILEPATH "python interpreter")
+set(PYTHON_EXECUTABLE ${PYTHON_EXECUTABLE} CACHE FILEPATH
+    "python buildtime interpreter")
 
-MESSAGE(STATUS "Python interpreter: ${PYTHON_EXECUTABLE}")
-MESSAGE(STATUS "Override with: -DPYTHON_EXECUTABLE=<path-to-python>")
+message(STATUS "Python interpreter: ${PYTHON_EXECUTABLE}")
+message(STATUS "Override with: -DPYTHON_EXECUTABLE=<path-to-python>")
 
-IF(NOT PYTHONINTERP_FOUND)
-    MESSAGE(FATAL_ERROR "Error: Python interpreter required by the build system.")
-ENDIF(NOT PYTHONINTERP_FOUND)
+if(NOT PYTHONINTERP_FOUND)
+    message(FATAL_ERROR "Error: Python interpreter required by the build system.")
+endif(NOT PYTHONINTERP_FOUND)
 
-MACRO(PYTHON_CHECK_MODULE desc mod cmd have)
-    MESSAGE(STATUS "")
-    MESSAGE(STATUS "Python checking for ${desc}")
-    EXECUTE_PROCESS(
+#this allows the user to override RUNTIME_PYTHON_EXECUTABLE
+if(NOT RUNTIME_PYTHON_EXECUTABLE)
+    #default to the buildtime interpreter
+    set(RUNTIME_PYTHON_EXECUTABLE ${PYTHON_EXECUTABLE})
+endif(NOT RUNTIME_PYTHON_EXECUTABLE)
+
+#make the path to the executable appear in the cmake gui
+set(RUNTIME_PYTHON_EXECUTABLE ${RUNTIME_PYTHON_EXECUTABLE} CACHE FILEPATH
+    "python runtime interpreter")
+
+message(STATUS "Python runtime interpreter: ${RUNTIME_PYTHON_EXECUTABLE}")
+message(STATUS "Override with: -DRUNTIME_PYTHON_EXECUTABLE=<path-to-python>")
+
+macro(PYTHON_CHECK_MODULE desc mod cmd have)
+    message(STATUS "")
+    message(STATUS "Python checking for ${desc}")
+    execute_process(
         COMMAND ${PYTHON_EXECUTABLE} -c "
 #########################################
+from distutils.version import LooseVersion
 try: import ${mod}
 except: exit(1)
 try: assert ${cmd}
@@ -68,19 +82,19 @@ exit(0)
 #########################################"
         RESULT_VARIABLE ${have}
     )
-    IF(${have} EQUAL 0)
-        MESSAGE(STATUS "Python checking for ${desc} - found")
-        SET(${have} TRUE)
-    ELSEIF(${have} EQUAL 1)
-        MESSAGE(STATUS "Python checking for ${desc} - \"import ${mod}\" failed")
-        SET(${have} FALSE)
-    ELSEIF(${have} EQUAL 2)
-        MESSAGE(STATUS "Python checking for ${desc} - \"assert ${cmd}\" failed")
-        SET(${have} FALSE)
-    ELSE()
-        MESSAGE(STATUS "Python checking for ${desc} - unknown error")
-        SET(${have} FALSE)
-    ENDIF()
-ENDMACRO(PYTHON_CHECK_MODULE)
+    if(${have} EQUAL 0)
+        message(STATUS "Python checking for ${desc} - found")
+        set(${have} TRUE)
+    elseif(${have} EQUAL 1)
+        message(STATUS "Python checking for ${desc} - \"import ${mod}\" failed")
+        set(${have} FALSE)
+    elseif(${have} EQUAL 2)
+        message(STATUS "Python checking for ${desc} - \"assert ${cmd}\" failed")
+        set(${have} FALSE)
+    else()
+        message(STATUS "Python checking for ${desc} - unknown error")
+        set(${have} FALSE)
+    endif()
+endmacro(PYTHON_CHECK_MODULE)
 
-ENDIF(NOT DEFINED INCLUDED_UHD_PYTHON_CMAKE)
+endif(NOT DEFINED INCLUDED_UHD_PYTHON_CMAKE)

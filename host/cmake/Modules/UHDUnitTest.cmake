@@ -1,18 +1,8 @@
 #
 # Copyright 2010-2012,2015 Ettus Research LLC
+# Copyright 2018 Ettus Research, a National Instruments Company
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 
 ########################################################################
@@ -29,16 +19,18 @@ function(UHD_ADD_TEST test_name)
         #directory itself.
         if(WIN32)
             set(UHD_TEST_LIBRARY_DIRS
-                "${Boost_LIBRARY_DIRS}"
                 "${CMAKE_BINARY_DIR}/lib/${CMAKE_BUILD_TYPE}"
                 "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE}"
+                "${Boost_LIBRARY_DIRS}"
             )
         else()
             set(UHD_TEST_LIBRARY_DIRS
-                "${Boost_LIBRARY_DIRS}"
                 "${CMAKE_BINARY_DIR}/lib"
                 "${CMAKE_CURRENT_BINARY_DIR}"
             )
+            if(NOT APPLE)
+                list(APPEND UHD_TEST_LIBRARY_DIRS "${Boost_LIBRARY_DIRS}")
+            endif(NOT APPLE)
         endif(WIN32)
 
     file(TO_NATIVE_PATH "${UHD_TEST_LIBRARY_DIRS}" libpath)
@@ -46,8 +38,8 @@ function(UHD_ADD_TEST test_name)
     #http://www.cmake.org/pipermail/cmake/2009-May/029464.html
     #Replaced this add test + set environs code with the shell script generation.
     #Its nicer to be able to manually run the shell script to diagnose problems.
-    #ADD_TEST(${ARGV})
-    #SET_TESTS_PROPERTIES(${test_name} PROPERTIES ENVIRONMENT "${environs}")
+    #add_test(${ARGV})
+    #set_tests_properties(${test_name} PROPERTIES ENVIRONMENT "${environs}")
 
     if(UNIX)
         set(LD_PATH_VAR "LD_LIBRARY_PATH")

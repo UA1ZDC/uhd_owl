@@ -6,9 +6,9 @@ Radio transport protocols are used to exchange samples (or other items) between 
 If one were to sniff Ethernet traffic between a USRP and a PC, the packets would conform to a
 radio transport protocol.
 
-For USRP devices, two radio transport protocols are relevent: VRT (the VITA Radio Transport protocol)
-and CVITA (compressed VITA), also known as CHDR. Generation-3 devices and the B200 use CHDR, the rest
-use VRT.
+For USRP devices, two radio transport protocols are relevant: VRT (the VITA Radio Transport protocol)
+and CHDR (compressed header, an Ettus-specific protocol).
+Generation-3 devices and the B200 use CHDR, the rest use VRT.
 
 \section rtp_vrt VRT
 
@@ -19,13 +19,12 @@ VRT is a very verbose standard, and only a subset is implemented in UHD/USRPs.
 The full standard is available from the VITA website: http://www.vita.com .
 
 
-\section rtp_chdr CVITA (CHDR)
+\section rtp_chdr CHDR
 
 For the third generation of Ettus devices, a new type transport protocol was designed.
 It reduces the complexity of the original standard and uses a fixed-length 64-Bit header
-for everything except the timestamp. Because this is a "compressed" form of VITA, it
-was dubbed "Compressed VITA" (CVITA). The compressed header is called CHDR, which is why
-the protocol is often called CHDR itself (pronounced like the cheese "cheddar").
+for everything except the timestamp. Because it is "compressed" into a 64-bit header, it
+was dubbed CHDR (pronounced like the cheese "cheddar").
 
 By compressing all information into a 64-bit line, the header can efficiently be parsed
 in newer FPGAs, where the common streaming protocol is 64-Bit AXI. The first line in a
@@ -33,7 +32,7 @@ packet already provides all necessary information to proceed.
 
 Some CHDR-specific functions can be found in: uhd::transport::vrt::chdr.
 
-The form of a CVITA packet is the following:
+The form of a CHDR packet is the following:
 
 Address (Bytes) | Length (Bytes) | Payload
 ----------------|----------------|----------------------------
@@ -52,20 +51,20 @@ Bits   | Meaning
 60     | End-of-burst or error flag
 59:48  | 12-bit sequence number
 47:32  | Total packet length in Bytes
-31:0   | Stream ID (SID)
-
+31:0   | Stream ID (SID). For the format of SID, see uhd::sid_t.
 
 The packet type is determined mainly by the first two bits, although
-the EOB or error flag are also taken into consideration:
+the EOB or error flag are also taken into consideration (the third bit does not
+affect the packet type):
 
-Bit 63 | Bit 62 | Bit 60 | Packet Type
--------|--------|--------|--------------
-0      | 0      | 0      | Data
-0      | 0      | 1      | Data (End-of-burst)
-0      | 1      | 0      | Flow Control
-1      | 0      | 0      | Command Packet
-1      | 1      | 0      | Command Response
-1      | 1      | 1      | Command Response (Error)
+Bit 63 | Bit 62 | Bit 61 | Bit 60 | Packet Type
+-------|--------|--------|--------|--------------
+0      | 0      | x      | 0      | Data
+0      | 0      | x      | 1      | Data (End-of-burst)
+0      | 1      | x      | 0      | Flow Control
+1      | 0      | x      | 0      | Command Packet
+1      | 1      | x      | 0      | Command Response
+1      | 1      | x      | 1      | Command Response (Error)
 
 \section vrt_tools Tools
 
@@ -74,9 +73,9 @@ for Ethernet links as well as USB (e.g., for the B210).
 
 \section vrt_code Code
 
-Relevent code sections for the radio transport layer are:
+Relevant code sections for the radio transport layer are:
 * uhd::transport::vrt - Namespace for radio transport protocol related functions and definitions
-* uhd::transport::vrt::chdr - Sub-namespace specifically for CVITA/CHDR
+* uhd::transport::vrt::chdr - Sub-namespace specifically for CHDR
 * uhd::sid_t - Datatype to represent SIDs
 
 */

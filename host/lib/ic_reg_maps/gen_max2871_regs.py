@@ -1,19 +1,9 @@
 #!/usr/bin/env python
 #
 # Copyright 2014 Ettus Research LLC
+# Copyright 2018 Ettus Research, a National Instruments Company
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 
 ########################################################################
@@ -74,6 +64,7 @@ counter_reset           0x02[3]         0       normal, reset
 vco                     0x03[26:31]     0
 ## VCO autoselect
 shutdown_vas            0x03[25]        0       enabled, disabled
+## should actually be called vas_temp ...
 retune                  0x03[24]        1       disabled, enabled
 res3                    0x3[19:23]      0
 csm                     0x3[18]         0       disabled, enabled
@@ -107,7 +98,9 @@ output_power            0x04[3:4]       3       m4dBm, m1dBm, 2dBm, 5dBm
 ## Misc
 ## Write only, default = 0x18400005
 ########################################################################
-res5_26_31              0x05[26:31]     0x18
+res5_31                 0x05[31]        0
+vas_dly                 0x05[29:30]     3       disabled, res0, res1, enabled
+res5_26_28              0x05[26:28]     0
 shutdown_pll            0x05[25]        0       enabled, disabled
 f01                     0x05[24]        1       frac_n, auto
 ld_pin_mode             0x05[22:23]     1       low, dld, ald, high
@@ -130,13 +123,13 @@ enum addr_t{
     ADDR_R5 = 5
 };
 
-boost::uint32_t get_reg(boost::uint8_t addr){
-    boost::uint32_t reg = addr & 0x7;
+uint32_t get_reg(uint8_t addr){
+    uint32_t reg = addr & 0x7;
     switch(addr){
     % for addr in range(5+1):
     case ${addr}:
         % for reg in filter(lambda r: r.get_addr() == addr, regs):
-        reg |= (boost::uint32_t(${reg.get_name()}) & ${reg.get_mask()}) << ${reg.get_shift()};
+        reg |= (uint32_t(${reg.get_name()}) & ${reg.get_mask()}) << ${reg.get_shift()};
         % endfor
         break;
     % endfor

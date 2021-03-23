@@ -18,7 +18,6 @@
 - FPGA Capabilities:
         - 2 RX DDC chains in FPGA
         - 2 TX DUC chain in FPGA
-	- Timed commands in FPGA
 	- Timed sampling in FPGA
 	- 16-bit fixed point sample mode (sc16)
 
@@ -31,8 +30,8 @@ up and running.
 
 There are two different methods to connect to the device
 
-- using the onboard serial to usb connector
-- using the gigabit ethernet connector and a ssh client on your host computer
+- using the onboard Serial to USB connector
+- using the gigabit Ethernet connector and a ssh client on your host computer
 
 For the first boot, booting with the serial cable connected to the device
 is recommended, as it allows to review and modify the \ref e3xx_network_configuration
@@ -118,7 +117,7 @@ in order to build software for your device open a new shell and type:
 
     $ . <yoursdkinstallpath>/environment-setup-armv7ahf-vfp-neon-oe-linux-gnueabi
 
-This will modifiy the PATH, CC, CXX etc, environment variables and allow you to compile software for your USRP E310 device.
+This will modify the PATH, CC, CXX etc, environment variables and allow you to compile software for your USRP E310 device.
 To verify all went well you can try:
 
     $ $CC -dumpmachine
@@ -151,6 +150,7 @@ for the E3XX if you are doing custom GNU Radio development work.
 
 \code{.sh}
 $ mkdir build-arm
+$ cd build-arm
 $ cmake -Wno-dev -DCMAKE_TOOLCHAIN_FILE=../cmake/Toolchains/oe-sdk_cross.cmake \-DCMAKE_INSTALL_PREFIX=/usr -DENABLE_GR_VOCODER=OFF -DENABLE_GR_ATSC=OFF \
 -DENABLE_GR_DTV=OFF -DENABLE_DOXYGEN=OFF ../
 \endcode
@@ -223,7 +223,7 @@ From the build directory run:
  $ sh ../meta-ettus/scripts/build-all.sh
 \endcode
 
-When the script finishes, the SD ard image files are in ./images and the sdk
+When the script finishes, the SD card image files are in ./images and the sdk
 is in tmp-glibc/deploy/sdk/ .
 
 -# Using the environment
@@ -237,9 +237,9 @@ again by:
 \section e3x0_upgrade_sd_card Upgrading / Writing image to sd card
 
 In order to upgrade or reinitialize a sd card for the first time, you can use the 'dd' tool.
-Make sure that you are using the right block device for your sd card as failing to do so can wipe your harddrive.
+Make sure that you are using the right block device for your sd card as failing to do so can wipe your hard drive.
 
-Replace `<yourimage>`.direct with your image file name and yoursdcard with your blockdevice e.g. /dev/mmcblk0 or /dev/sdb.
+Replace `<yourimage>`.direct with your image file name and `<yoursdcard>` with your blockdevice e.g. /dev/mmcblk0 or /dev/sdb.
 
     $ sudo dd if=<yourimage>.direct of=/dev/<yoursdcard> bs=1M
 
@@ -345,13 +345,16 @@ It's behavior is firmware version dependent.
 - **SERIAL**: Micro USB connection for serial uart console
 
 \subsection e3x0_hw_sync Clock and Time Synchronization
+
 Unlike most USRP devices, the E310 does not have independent reference clock and time source inputs.
 It is possible, however, to discipline the internal reference clock using an external time (PPS) source
 connected to the SYNC input pin. The E310 FPGA has a subsystem that can use the PPS signal from the
 SYNC pin or the internal GPS to align edges of the reference clock to edges of a shared PPS signal. 
 This alignment happens automatically when the time source in UHD is set to "gpsdo" or "external". 
 Please note that because the SYNC input can only accept a PPS signal, the only supported value for 
-the reference clock source is "internal".
+the reference clock source is "internal". Also, keep in mind that the E310
+does *not* have a GPS-disciplined oscillator like other USRPs, the value "gpsdo"
+for the time source was chosen for compatibility with other USRPs.
 
 
 \subsection e3x0_hw_pps PPS - Pulse Per Second
@@ -370,8 +373,11 @@ To test the PPS input, you can use the following tool from the UHD examples:
 
 Your USRP-E Series device comes with an internal GPS.
 In order to get a lock on a satellite an external GPS antenna is required.
-The PPS from the internal GPS can be used to discipline the internal reference clock. This feature is automatically 
-enabled with the time source is set to "gpsdo".
+The PPS from the internal GPS can be used to discipline the internal reference
+clock. This feature is automatically enabled with the time source is set to
+"gpsdo". Again, keep in mind that the E310 does not have an actual
+GPS-disciplined oscillator (GPSDO) on the board, the value "gpsdo" was named
+such for better compatibility with code written for other devices.
 
 The device provides a 3.3V supply voltage to an external antenna connected to the *GPS* port
 of your device. Note that this supply voltage is turned off in order to safe power upon destruction of the software object.
@@ -389,7 +395,7 @@ To test the accelerometer, run:
 
     $ RTIMULibDrive
 
-This will print the current acclerometer values on the console.
+This will print the current accelerometer values on the console.
 
 To launch the IMU calibration procedure, run:
 
@@ -431,7 +437,8 @@ For more advanced IMU based applications please refer to the <a href="https://gi
 
 Please see the \ref page_gpio_api for information on configuring and using the GPIO bus.
 
-\subsection e3x0_hw_audio Audio connectors
+\subsection e3x0_hw_audio Audio connectors (if populated)
+
 The E3x0 2.5 mm Audio Jack TRRS pins are assigned as follows: Tip=Mic, Ring1=Right, Ring2=Left, Sleeve=GND. 
 
 \image html TRRS.png "Audio Jack"
@@ -518,7 +525,7 @@ The procedure for calibration is as follows:
 
 A faster (less accurate) calibration procedure is as follows:
 
-1. Completly charge battery
+1. Completely charge battery
 2. Type:
 
     $ echo 3200000 > /sys/class/power_supply/BAT/charge_now
@@ -538,6 +545,22 @@ The RF frontend has individually tunable receive and transmit chains.
 Both transmit and receive can be used in a MIMO configuration. For
 the MIMO case, both receive frontends share the RX LO, and both transmit
 frontends share the TX LO. Each LO is tunable between 50 MHz and 6 GHz.
+
+As there is a single LO for each direction (RX and TX), this means that both
+channels need to use the same LO frequency (i.e., both RX channels share an LO
+frequency, and both TX channels share an LO frequency). If the two channels
+are supposed to receive on different frequencies, the digital tune stages need
+to be used for that. The two frequencies will need to be within the currently
+selected master clock rate, and the final bandwidths need to be chosen
+carefully. Example: Assume the master clock rate is set to 50 MHz, and we want
+to receive at 400 MHz and 440 MHz. We can set the LO to 420 MHz, which will
+sample the spectrum from 395 MHz to 445 MHz. The LO offsets for both channels
+need to be 20 MHz and -20 MHz respectively. However, the final bandwidth should
+be less than 10 MHz (preferably lower), or the signals would exhibit aliasing.
+
+Because both channels share an LO, tuning one channel can possibly affect the
+other channel. It is advisable to read back the actual, current frequency from
+software before assuming the device is tuned to a specific frequency.
 
 \subsubsection e3x0_dboard_e310_gain Frontend gain
 
@@ -573,7 +596,7 @@ Source code related to controlling the filter band and antenna switches resides 
 methods set the switches depending on the state of transmit and receive streams.
 
 The following sections provide switch setting tables for antenna and filter selection for frontends A & B receive and transmit paths.
-For futher details refer to the schematics. 
+For further details refer to the schematics. 
 
 \subsubsection e3x0_dboard_e310_frontend_a_switches Frontend Side A Filter and Antenna Switches
 
@@ -628,13 +651,13 @@ TRX-B   | 1200 – 1800     | 10            | 01          | 001              | 1
 TRX-B   | 1800 – 2350     | 10            | 01          | 011              | 11                | XX               
 TRX-B   | 2350 – 2600     | 10            | 01          | 101              | 01                | XX               
 TRX-B   | 2600 – 6000     | 10            | 10          | XXX              | XX                | XX               
-RX2-B   | 70  – 450       | TT            | 10          | 100              | XX                | 10               
-RX2-B   | 450 – 700       | TT            | 10          | 010              | XX                | 11               
-RX2-B   | 700 – 1200      | TT            | 10          | 000              | XX                | 01               
-RX2-B   | 1200 – 1800     | TT            | 10          | 001              | 10                | XX               
-RX2-B   | 1800 – 2350     | TT            | 10          | 011              | 11                | XX               
-RX2-B   | 2350 – 2600     | TT            | 10          | 101              | 01                | XX               
-RX2-B   | >= 2600         | TT            | 01          | XXX              | XX                | XX               
+RX2-B   | 70  – 450       | TT            | 01          | 100              | XX                | 10               
+RX2-B   | 450 – 700       | TT            | 01          | 010              | XX                | 11               
+RX2-B   | 700 – 1200      | TT            | 01          | 000              | XX                | 01               
+RX2-B   | 1200 – 1800     | TT            | 01          | 001              | 10                | XX               
+RX2-B   | 1800 – 2350     | TT            | 01          | 011              | 11                | XX               
+RX2-B   | 2350 – 2600     | TT            | 01          | 101              | 01                | XX               
+RX2-B   | >= 2600         | TT            | 10          | XXX              | XX                | XX               
 
 __Transmit__
 TX Port | TX Filter (MHz) | VCTXRX1_V1,V2 | TX_ENABLE1A,1B | TX1_BANDSEL[2:0]

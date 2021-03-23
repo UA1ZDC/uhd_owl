@@ -1,34 +1,32 @@
 //
 // Copyright 2014 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #ifndef INCLUDED_N230_RESOURCE_MANAGER_HPP
 #define INCLUDED_N230_RESOURCE_MANAGER_HPP
 
-#include "radio_ctrl_core_3000.hpp"
-#include "spi_core_3000.hpp"
-#include "gpio_atr_3000.hpp"
-#include "rx_vita_core_3000.hpp"
-#include "tx_vita_core_3000.hpp"
-#include "time_core_3000.hpp"
-#include "rx_dsp_core_3000.hpp"
-#include "tx_dsp_core_3000.hpp"
-#include "user_settings_core_3000.hpp"
-#include "ad9361_ctrl.hpp"
-#include "ad936x_manager.hpp"
+#include "n230_fw_ctrl_iface.hpp"
+#include "n230_clk_pps_ctrl.hpp"
+#include "n230_cores.hpp"
+#include "n230_fpga_defs.h"
+#include "n230_frontend_ctrl.hpp"
+#include "n230_uart.hpp"
+
+#include <uhdlib/usrp/cores/radio_ctrl_core_3000.hpp>
+#include <uhdlib/usrp/cores/spi_core_3000.hpp>
+#include <uhdlib/usrp/cores/gpio_atr_3000.hpp>
+#include <uhdlib/usrp/cores/rx_vita_core_3000.hpp>
+#include <uhdlib/usrp/cores/tx_vita_core_3000.hpp>
+#include <uhdlib/usrp/cores/time_core_3000.hpp>
+#include <uhdlib/usrp/cores/rx_dsp_core_3000.hpp>
+#include <uhdlib/usrp/cores/tx_dsp_core_3000.hpp>
+#include <uhdlib/usrp/cores/user_settings_core_3000.hpp>
+#include <uhdlib/usrp/common/ad9361_ctrl.hpp>
+#include <uhdlib/usrp/common/ad936x_manager.hpp>
+
 #include <uhd/utils/tasks.hpp>
 #include <uhd/types/sid.hpp>
 #include <uhd/types/device_addr.hpp>
@@ -36,13 +34,6 @@
 #include <uhd/transport/udp_zero_copy.hpp>
 #include <uhd/transport/bounded_buffer.hpp>
 #include <uhd/usrp/gps_ctrl.hpp>
-
-#include "usrp3_fw_ctrl_iface.hpp"
-#include "n230_clk_pps_ctrl.hpp"
-#include "n230_cores.hpp"
-#include "n230_fpga_defs.h"
-#include "n230_frontend_ctrl.hpp"
-#include "n230_uart.hpp"
 
 namespace uhd { namespace usrp { namespace n230 {
 
@@ -98,7 +89,7 @@ public:     //Methods
     n230_resource_manager(const std::vector<std::string> ip_addrs, const bool safe_mode);
     virtual ~n230_resource_manager();
 
-    static bool is_device_claimed(uhd::usrp::usrp3::usrp3_fw_ctrl_iface::sptr fw_ctrl);
+    static bool is_device_claimed(n230_fw_ctrl_iface::sptr fw_ctrl);
 
     inline bool is_device_claimed() {
         if (_fw_ctrl.get()) {
@@ -108,7 +99,7 @@ public:     //Methods
         }
     }
 
-    inline boost::uint32_t get_version(n230_ver_src_t src, n230_version_t type) {
+    inline uint32_t get_version(n230_ver_src_t src, n230_version_t type) {
         switch (src) {
             case FPGA:      return _fpga_version.get(type);
             case FIRMWARE:  return _fw_version.get(type);
@@ -210,11 +201,11 @@ public:     //Methods
 
 private:
     struct ver_info_t {
-        boost::uint8_t  compat_major;
-        boost::uint16_t compat_minor;
-        boost::uint32_t version_hash;
+        uint8_t  compat_major;
+        uint16_t compat_minor;
+        uint32_t version_hash;
 
-        boost::uint32_t get(n230_version_t type) {
+        uint32_t get(n230_version_t type) {
             switch (type) {
                 case COMPAT_MAJOR: return compat_major;
                 case COMPAT_MINOR: return compat_minor;
@@ -276,12 +267,12 @@ private:
     ver_info_t                      _fpga_version;
 
     //Firmware register interface
-    uhd::usrp::usrp3::usrp3_fw_ctrl_iface::sptr   _fw_ctrl;
+    n230_fw_ctrl_iface::sptr        _fw_ctrl;
     uhd::task::sptr                 _claimer_task;
     static boost::mutex             _claimer_mutex;  //All claims and checks in this process are serialized
 
     //Transport
-    boost::uint8_t                  _last_host_enpoint;
+    uint8_t                         _last_host_enpoint;
 
     //Radio settings interface
     radio_ctrl_core_3000::sptr      _core_ctrl;

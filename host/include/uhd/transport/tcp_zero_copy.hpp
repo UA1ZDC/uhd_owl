@@ -1,18 +1,8 @@
 //
 // Copyright 2010-2015 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #ifndef INCLUDED_UHD_TRANSPORT_TCP_ZERO_COPY_HPP
@@ -23,7 +13,7 @@
 #include <uhd/types/device_addr.hpp>
 #include <boost/shared_ptr.hpp>
 
-namespace uhd{ namespace transport{
+namespace uhd { namespace transport {
 
 /*!
  * The zero copy TCP transport.
@@ -47,13 +37,11 @@ struct UHD_API tcp_zero_copy : public virtual zero_copy_if
      * \param port a string representing the destination port
      * \param hints optional parameters to pass to the underlying transport
      */
-    static zero_copy_if::sptr make(
-        const std::string &addr,
-        const std::string &port,
-        const device_addr_t &hints = device_addr_t()
-    );
+    static zero_copy_if::sptr make(const std::string& addr,
+        const std::string& port,
+        const device_addr_t& hints = device_addr_t());
 };
 
-}} //namespace
+}} // namespace uhd::transport
 
 #endif /* INCLUDED_UHD_TRANSPORT_TCP_ZERO_COPY_HPP */

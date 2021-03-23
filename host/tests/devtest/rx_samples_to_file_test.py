@@ -1,19 +1,9 @@
 #!/usr/bin/env python
 #
 # Copyright 2015 Ettus Research LLC
+# Copyright 2018 Ettus Research, a National Instruments Company
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 """ Test the rx_samples_to_file example. """
 
@@ -52,14 +42,12 @@ class rx_samples_to_file_test(uhd_example_test_case):
             '--rate', str(test_args.get('rate', 1e6)),
             '--wirefmt', test_args.get('wirefmt', 'sc16'),
         ]
-        if test_args.has_key('subdev'):
+        if 'subdev' in test_args:
             args.append('--subdev')
             args.append(test_args['subdev'])
-        (app, run_results) = self.run_example('rx_samples_to_file', args)
+        _, run_results = self.run_example('rx_samples_to_file', args)
         # Evaluate pass/fail:
         run_results['passed'] = all([
-            not run_results['has_D'],
-            not run_results['has_S'],
             run_results['return_code'] == 0,
         ])
         self.report_example_results(test_name, run_results)

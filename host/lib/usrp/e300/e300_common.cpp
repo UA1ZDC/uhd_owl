@@ -1,21 +1,11 @@
 //
 // Copyright 2014-2015 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 #include <uhd/image_loader.hpp>
-#include <uhd/utils/msg.hpp>
+#include <uhd/utils/log.hpp>
 #include <uhd/utils/paths.hpp>
 #include <uhd/utils/static.hpp>
 
@@ -39,7 +29,7 @@ void load_fpga_image(const std::string &path)
     if (not boost::filesystem::exists("/dev/xdevcfg"))
         ::system("mknod /dev/xdevcfg c 259 0");
 
-    UHD_MSG(status) << "Loading FPGA image: " << path << "..." << std::flush;
+    UHD_LOGGER_INFO("E300") << "Loading FPGA image: " << path << "...";
 
     std::ifstream fpga_file(path.c_str(), std::ios_base::binary);
     UHD_ASSERT_THROW(fpga_file.good());
@@ -57,7 +47,7 @@ void load_fpga_image(const std::string &path)
     fpga_file.close();
     std::fclose(wfile);
 
-    UHD_MSG(status) << " done" << std::endl;
+    UHD_LOGGER_INFO("E300") << "FPGA image loaded";
 }
 
 static bool e300_image_loader(const image_loader::image_loader_args_t &image_loader_args) {

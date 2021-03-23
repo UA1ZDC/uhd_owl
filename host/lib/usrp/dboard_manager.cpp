@@ -1,23 +1,12 @@
 //
-// Copyright 2010-2011 Ettus Research LLC
+// Copyright 2010-2011,2017 Ettus Research, A National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include "dboard_ctor_args.hpp"
 #include <uhd/usrp/dboard_manager.hpp>
-#include <uhd/utils/msg.hpp>
+#include <uhd/utils/log.hpp>
 #include <uhd/utils/log.hpp>
 #include <uhd/utils/safe_call.hpp>
 #include <uhd/utils/static.hpp>
@@ -26,7 +15,6 @@
 #include <boost/tuple/tuple.hpp>
 #include <boost/format.hpp>
 #include <boost/bind.hpp>
-#include <boost/foreach.hpp>
 #include <boost/assign/list_of.hpp>
 
 using namespace uhd;
@@ -97,7 +85,7 @@ static void register_dboard_key(
     const std::vector<std::string> &subdev_names,
     dboard_manager::dboard_ctor_t db_container_ctor
 ){
-    UHD_LOGV(always) << "registering: " << name << std::endl;
+    // UHD_LOGGER_TRACE("DBMGR") << "registering: " << name;
     if (get_id_to_args_map().has_key(dboard_key)){
 
         if (dboard_key.is_xcvr()) throw uhd::key_error(str(boost::format(
@@ -156,7 +144,7 @@ void dboard_manager::register_dboard_restricted(
 
 std::string dboard_id_t::to_cname(void) const{
     std::string cname;
-    BOOST_FOREACH(const dboard_key_t &key, get_id_to_args_map().keys()){
+    for(const dboard_key_t &key:  get_id_to_args_map().keys()){
         if (
             (not key.is_xcvr() and *this == key.xx_id()) or
             (key.is_xcvr() and (*this == key.rx_id() or *this == key.tx_id()))
@@ -179,8 +167,8 @@ class dboard_manager_impl : public dboard_manager{
 
 public:
     dboard_manager_impl(
-        dboard_id_t rx_dboard_id,
-        dboard_id_t tx_dboard_id,
+        dboard_eeprom_t rx_eeprom,
+        dboard_eeprom_t tx_eeprom,
         dboard_iface::sptr iface,
         property_tree::sptr subtree,
         bool defer_db_init
@@ -198,7 +186,7 @@ public:
     void initialize_dboards();
 
 private:
-    void init(dboard_id_t, dboard_id_t, property_tree::sptr, bool);
+    void init(dboard_eeprom_t, dboard_eeprom_t, property_tree::sptr, bool);
     //list of rx and tx dboards in this dboard_manager
     //each dboard here is actually a subdevice proxy
     //the subdevice proxy is internal to the cpp file
@@ -223,10 +211,31 @@ dboard_manager::sptr dboard_manager::make(
     property_tree::sptr subtree,
     bool defer_db_init
 ){
+    dboard_eeprom_t rx_eeprom;
+    dboard_eeprom_t tx_eeprom;
+    rx_eeprom.id = rx_dboard_id;
+    tx_eeprom.id = (gdboard_id == dboard_id_t::none()) ? tx_dboard_id : gdboard_id;
     return dboard_manager::sptr(
         new dboard_manager_impl(
-            rx_dboard_id,
-            (gdboard_id == dboard_id_t::none())? tx_dboard_id : gdboard_id,
+            rx_eeprom,
+            tx_eeprom,
+            iface, subtree, defer_db_init
+        )
+    );
+}
+
+dboard_manager::sptr dboard_manager::make(
+    dboard_eeprom_t rx_eeprom,
+    dboard_eeprom_t tx_eeprom,
+    dboard_eeprom_t gdb_eeprom,
+    dboard_iface::sptr iface,
+    property_tree::sptr subtree,
+    bool defer_db_init
+){
+    return dboard_manager::sptr(
+        new dboard_manager_impl(
+            rx_eeprom,
+            (gdb_eeprom.id == dboard_id_t::none())? tx_eeprom : gdb_eeprom,
             iface, subtree, defer_db_init
         )
     );
@@ -236,8 +245,8 @@ dboard_manager::sptr dboard_manager::make(
  * implementation class methods
  **********************************************************************/
 dboard_manager_impl::dboard_manager_impl(
-    dboard_id_t rx_dboard_id,
-    dboard_id_t tx_dboard_id,
+    dboard_eeprom_t rx_eeprom,
+    dboard_eeprom_t tx_eeprom,
     dboard_iface::sptr iface,
     property_tree::sptr subtree,
     bool defer_db_init
@@ -245,47 +254,52 @@ dboard_manager_impl::dboard_manager_impl(
     _iface(iface)
 {
     try{
-        this->init(rx_dboard_id, tx_dboard_id, subtree, defer_db_init);
+        this->init(rx_eeprom, tx_eeprom, subtree, defer_db_init);
     }
     catch(const std::exception &e){
-        UHD_MSG(error) << boost::format(
+        UHD_LOGGER_ERROR("DBMGR") << boost::format(
             "The daughterboard manager encountered a recoverable error in init.\n"
             "Loading the \"unknown\" daughterboard implementations to continue.\n"
             "The daughterboard cannot operate until this error is resolved.\n"
-        ) << e.what() << std::endl;
+        ) << e.what() ;
         //clean up the stuff added by the call above
         if (subtree->exists("rx_frontends")) subtree->remove("rx_frontends");
         if (subtree->exists("tx_frontends")) subtree->remove("tx_frontends");
         if (subtree->exists("iface"))        subtree->remove("iface");
-        this->init(dboard_id_t::none(), dboard_id_t::none(), subtree, false);
+        dboard_eeprom_t dummy_eeprom;
+        dummy_eeprom.id = dboard_id_t::none();
+        this->init(dummy_eeprom, dummy_eeprom, subtree, false);
     }
 }
 
 void dboard_manager_impl::init(
-    dboard_id_t rx_dboard_id, dboard_id_t tx_dboard_id, property_tree::sptr subtree, bool defer_db_init
+    dboard_eeprom_t rx_eeprom,
+    dboard_eeprom_t tx_eeprom,
+    property_tree::sptr subtree,
+    bool defer_db_init
 ){
     //find the dboard key matches for the dboard ids
     dboard_key_t rx_dboard_key, tx_dboard_key, xcvr_dboard_key;
-    BOOST_FOREACH(const dboard_key_t &key, get_id_to_args_map().keys()){
+    for(const dboard_key_t &key:  get_id_to_args_map().keys()){
         if (key.is_xcvr()){
-            if (rx_dboard_id == key.rx_id() and tx_dboard_id == key.tx_id()) xcvr_dboard_key = key;
-            if (rx_dboard_id == key.rx_id()) rx_dboard_key = key; //kept to handle warning
-            if (tx_dboard_id == key.tx_id()) tx_dboard_key = key; //kept to handle warning
+            if (rx_eeprom.id == key.rx_id() and tx_eeprom.id == key.tx_id()) xcvr_dboard_key = key;
+            if (rx_eeprom.id == key.rx_id()) rx_dboard_key = key; //kept to handle warning
+            if (rx_eeprom.id == key.tx_id()) tx_dboard_key = key; //kept to handle warning
         }
         else{
-            if (rx_dboard_id == key.xx_id()) rx_dboard_key = key;
-            if (tx_dboard_id == key.xx_id()) tx_dboard_key = key;
+            if (rx_eeprom.id == key.xx_id()) rx_dboard_key = key;
+            if (tx_eeprom.id == key.xx_id()) tx_dboard_key = key;
         }
     }
 
     //warn for invalid dboard id xcvr combinations
     if (not xcvr_dboard_key.is_xcvr() and (rx_dboard_key.is_xcvr() or tx_dboard_key.is_xcvr())){
-        UHD_MSG(warning) << boost::format(
+        UHD_LOGGER_WARNING("DBMGR") << boost::format(
             "Unknown transceiver board ID combination.\n"
             "Is your daughter-board mounted properly?\n"
             "RX dboard ID: %s\n"
             "TX dboard ID: %s\n"
-        ) % rx_dboard_id.to_pp_string() % tx_dboard_id.to_pp_string();
+        ) % rx_eeprom.id.to_pp_string() % tx_eeprom.id.to_pp_string();
     }
 
     //initialize the gpio pins before creating subdevs
@@ -310,8 +324,8 @@ void dboard_manager_impl::init(
         //create the container class.
         //a container class exists per N subdevs registered in a register_dboard* call
         db_ctor_args.sd_name    = "common";
-        db_ctor_args.rx_id      = rx_dboard_id;
-        db_ctor_args.tx_id      = tx_dboard_id;
+        db_ctor_args.rx_eeprom  = rx_eeprom;
+        db_ctor_args.tx_eeprom  = tx_eeprom;
         db_ctor_args.rx_subtree = subtree->subtree("rx_frontends/" + db_ctor_args.sd_name);
         db_ctor_args.tx_subtree = subtree->subtree("tx_frontends/" + db_ctor_args.sd_name);
         if (container_ctor) {
@@ -322,7 +336,7 @@ void dboard_manager_impl::init(
         db_ctor_args.tx_container = db_ctor_args.rx_container;  //Same TX and RX container
 
         //create the xcvr object for each subdevice
-        BOOST_FOREACH(const std::string &subdev, subdevs){
+        for(const std::string &subdev:  subdevs){
             db_ctor_args.sd_name = subdev;
             db_ctor_args.rx_subtree = subtree->subtree("rx_frontends/" + db_ctor_args.sd_name);
             db_ctor_args.tx_subtree = subtree->subtree("tx_frontends/" + db_ctor_args.sd_name);
@@ -362,8 +376,8 @@ void dboard_manager_impl::init(
         //create the container class.
         //a container class exists per N subdevs registered in a register_dboard* call
         db_ctor_args.sd_name    = "common";
-        db_ctor_args.rx_id      = rx_dboard_id;
-        db_ctor_args.tx_id      = dboard_id_t::none();
+        db_ctor_args.rx_eeprom  = rx_eeprom;
+        db_ctor_args.tx_eeprom.id = dboard_id_t::none();
         db_ctor_args.rx_subtree = subtree->subtree("rx_frontends/" + db_ctor_args.sd_name);
         db_ctor_args.tx_subtree = property_tree::sptr();
         if (rx_cont_ctor) {
@@ -373,7 +387,7 @@ void dboard_manager_impl::init(
         }
 
         //make the rx subdevs
-        BOOST_FOREACH(const std::string &subdev, rx_subdevs){
+        for(const std::string &subdev:  rx_subdevs){
             db_ctor_args.sd_name = subdev;
             db_ctor_args.rx_subtree = subtree->subtree("rx_frontends/" + db_ctor_args.sd_name);
             _rx_dboards[subdev] = rx_dboard_ctor(&db_ctor_args);
@@ -401,8 +415,8 @@ void dboard_manager_impl::init(
         //create the container class.
         //a container class exists per N subdevs registered in a register_dboard* call
         db_ctor_args.sd_name    = "common";
-        db_ctor_args.rx_id      = dboard_id_t::none();
-        db_ctor_args.tx_id      = tx_dboard_id;
+        db_ctor_args.rx_eeprom.id = dboard_id_t::none();
+        db_ctor_args.tx_eeprom  = tx_eeprom;
         db_ctor_args.rx_subtree = property_tree::sptr();
         db_ctor_args.tx_subtree = subtree->subtree("tx_frontends/" + db_ctor_args.sd_name);
         if (tx_cont_ctor) {
@@ -412,7 +426,7 @@ void dboard_manager_impl::init(
         }
 
         //make the tx subdevs
-        BOOST_FOREACH(const std::string &subdev, tx_subdevs){
+        for(const std::string &subdev:  tx_subdevs){
             db_ctor_args.sd_name = subdev;
             db_ctor_args.tx_subtree = subtree->subtree("tx_frontends/" + db_ctor_args.sd_name);
             _tx_dboards[subdev] = tx_dboard_ctor(&db_ctor_args);
@@ -436,11 +450,11 @@ void dboard_manager_impl::init(
 }
 
 void dboard_manager_impl::initialize_dboards(void) {
-    BOOST_FOREACH(dboard_base::sptr& _rx_container, _rx_containers) {
+    for(dboard_base::sptr& _rx_container:  _rx_containers) {
         _rx_container->initialize();
     }
 
-    BOOST_FOREACH(dboard_base::sptr& _tx_container, _tx_containers) {
+    for(dboard_base::sptr& _tx_container:  _tx_containers) {
         _tx_container->initialize();
     }
 }
@@ -451,13 +465,13 @@ dboard_manager_impl::~dboard_manager_impl(void){UHD_SAFE_CALL(
 
 void dboard_manager_impl::set_nice_dboard_if(void){
     //make a list of possible unit types
-    std::vector<dboard_iface::unit_t> units = boost::assign::list_of
-        (dboard_iface::UNIT_RX)
-        (dboard_iface::UNIT_TX)
-    ;
+    const std::vector<dboard_iface::unit_t> units{
+        dboard_iface::UNIT_RX,
+        dboard_iface::UNIT_TX
+    };
 
     //set nice settings on each unit
-    BOOST_FOREACH(dboard_iface::unit_t unit, units){
+    for(dboard_iface::unit_t unit:  units){
         _iface->set_gpio_ddr(unit, 0x0000); //all inputs
         _iface->set_gpio_out(unit, 0x0000); //all low
         _iface->set_pin_ctrl(unit, 0x0000); //all gpio

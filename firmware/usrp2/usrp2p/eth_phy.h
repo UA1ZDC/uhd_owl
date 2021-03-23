@@ -38,14 +38,11 @@
 #define PHY_1000T_STATUS 0x0A /* 1000Base-T Status Reg */
 #define PHY_EXT_STATUS   0x0F /* Extended Status Reg */
 
-/* PHY 1000 MII Register additions in DP83856 */
-/* The part implements 0x00 thru 0x1f; we use these. */
-
-#define	PHY_LINK_AN	 0x11 /* Link and Auto Negotiation Status Reg */
-#define PHY_INT_STATUS	 0x14 /* Interupt Status Reg (RO) */
-#define PHY_INT_MASK	 0x15 /* Interrupt Mask Reg  (RW) */
-#define PHY_INT_CLEAR    0x17 /* Interrupt Clear Reg (RW) */
-
+/* PHY 1000 MII Register additions in ET1011C */
+#define PHY_INT_MASK     24
+#define PHY_INT_STATUS   25
+#define PHY_PHY_STATUS   26
+#define PHY_LED2         28
 
 /* Bit definitions for some of the registers above */
 
@@ -180,40 +177,59 @@
 #define AUTO_POLARITY_DISABLE  0x0010 /* register 11h bit 4 */
                                       /* (0=enable, 1=disable) */
 
-/* Link and Auto Negotiation Status Reg (PHY_LINK_AN) [READ-ONLY] */
-#define	LANSR_MASTER           0x0001 /* 1=PHY is currently in master mode */
-#define	LANSR_FULL_DUPLEX      0x0002 /* 1=PHY is currently full duplex */
-#define LANSR_LINK_GOOD        0x0004 /* 1=a good link is established */
-#define LANSR_SPEED_MASK       0x0018
-#define	  LANSR_SPEED_10       0x0000 /*   10Mb/s */
-#define	  LANSR_SPEED_100      0x0008 /*  100Mb/s */
-#define	  LANSR_SPEED_1000     0x0010 /* 1000Mb/s */
-#define	  LANSR_SPEED_RSRVD    0x0018 /* reserved */
-#define LANSR_NON_COMP_MODE    0x0020 /* 1=detects only in non-compliant mode */
-#define	LANSR_DEEP_LOOPBACK    0x0040 /* 1=the PHY operates in deep loopback mode */
-#define	LANSR_SHALLOW_LOOPBACK 0x0080 /* 1=the PHY operates in shallow loopback mode */
-#define LANSR_RSRVD_8	       0x0100 /* reserved */
-#define LANSR_FIFO_ERR	       0x0200 /* 1=FIFO error occurred */
-#define	LANSR_MDIX_XOVER       0x0400 /* 1=PHY's MDI is in cross-over mode */
-#define	LANSR_RSRVD_11	       0x0800 /* resevered */
-#define	LANSR_TP_POLARITY_REV  0xf000 /* Twisted pair polarity status A:D([15:12]) 1=reversed */
+/* PHY Status Register (PHY_PHY_STATUS) */
+#define PHYSTAT_ASYMMETRIC   (1 << 0)
+#define PHYSTAT_PAUSE        (1 << 1)
+#define PHYSTAT_AUTONEG_EN   (1 << 2)
+#define PHYSTAT_COLLISION    (1 << 3)
+#define PHYSTAT_RXSTAT       (1 << 4)
+#define PHYSTAT_TXSTAT       (1 << 5)
+#define PHYSTAT_LINK         (1 << 6)
+#define PHYSTAT_DUPLEX       (1 << 7)
+#define PHYSTAT_SPEED_MASK   ((1 << 8) | (1 << 9))
+#define PHYSTAT_SPEED_1000   (1 << 9)
+#define PHYSTAT_SPEED_100    (1 << 8)
+#define PHYSTAT_SPEED_10     0
+#define PHYSTAT_POLARITY     (1 << 10)
+#define PHYSTAT_MDIX         (1 << 11)
+#define PHYSTAT_AUTONEG_STAT (1 << 12)
+#define PHYSTAT_STANDBY      (1 << 13)
 
 /* Interrupt status, mask and clear regs (PHY_INT_{STATUS,MASK,CLEAR}) */
-#define	PHY_INT_RSRVD_0	       0x0001 /* reserved */
-#define	PHY_INT_RSRVD_1	       0x0002 /* reserved */
-#define	PHY_INT_RSRVD_2	       0x0004 /* reserved */
-#define	PHY_INT_REM_FLT_CNG    0x0008 /* Remote Fault Changed */
-#define	PHY_INT_AN_CMPL	       0x0010 /* Auto-negotiation completion */
-#define	PHY_INT_NXT_PG_RCVD    0x0020 /* Next Page Received */
-#define PHY_INT_JABBER_CNG     0x0040 /* Jabber Changed */
-#define PHY_INT_NO_LINK	       0x0080 /* No link after auto-negotiation */
-#define PHY_INT_NO_HCD	       0x0100 /* AN couldn't determine highest common denominator */
-#define PHY_INT_MAS_SLA_ERR    0x0200 /* Master / Slave Error: couldn't resolve */
-#define PHY_INT_PRL_DET_FLT    0x0400 /* Parallel detection fault */
-#define PHY_INT_POL_CNG	       0x0800 /* Polarity of any channel changed */
-#define	PHY_INT_MDIX_CNG       0x1000 /* MDIX changed.  A pair swap occurred. */
-#define PHY_INT_DPLX_CNG       0x2000 /* Duplex changed */
-#define PHY_INT_LNK_CNG	       0x4000 /* Link changed (asserted when a link is established or broken) */
-#define PHY_INT_SPD_CNG	       0x8000 /* Speed changed */
+#define PHY_INT_ENABLE         (1 << 0)
+#define PHY_INT_DOWNSHIFT      (1 << 1)
+#define PHY_INT_LINK_STATUS_CHANGE  (1 << 2)
+#define PHY_INT_RX_STATUS_CHANGE (1 << 3)
+#define PHY_INT_FIFO_ERROR     (1 << 4)
+#define PHY_INT_ERR_CTR_FULL   (1 << 5)
+#define PHY_INT_NEXT_PAGE_RX   (1 << 6)
+#define PHY_INT_CRC_ERROR      (1 << 7)
+#define PHY_INT_AUTONEG_STATUS_CHANGE (1 << 8)
+#define PHY_INT_MDIO_SYNC_LOST (1 << 9)
+#define PHY_INT_TDR_IP_PHONE   (1 << 10)
+
+/* PHY LED status register 2 (used for controlling link LED for activity light) */
+#define PHY_LED_TXRX_LSB           12
+#define PHY_LED_LINK_LSB           8
+#define PHY_LED_100_LSB            4
+#define PHY_LED_1000_LSB           0
+
+#define LED_1000                   0
+#define LED_100_TX                 1
+#define LED_10                     2
+#define LED_1000_ON_100_BLINK      3
+#define LED_LINK                   4
+#define LED_TX                     5
+#define LED_RX                     6
+#define LED_ACTIVITY               7
+#define LED_FULLDUPLEX             8
+#define LED_COLLISION              9
+#define LED_LINK_ON_ACTIVITY_BLINK 10
+#define LED_LINK_ON_RX_BLINK       11
+#define LED_FULL_DUPLEX_ON_COLLISION_BLINK 12
+#define LED_BLINK                  13
+#define LED_ON                     14
+#define LED_OFF                    15
+
 
 #endif /* INCLUDED_ETH_PHY_H */

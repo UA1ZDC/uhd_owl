@@ -5,7 +5,7 @@
   <key>DDC</key>
   <!--There can be several of these:-->
   <ids>
-    <id revision="0">DDC0</id>
+    <id revision="0">DDC0000000000000</id>
   </ids>
   <!-- Registers -->
   <registers>
@@ -25,8 +25,8 @@
     </setreg>
     <!-- DDC block registers -->
     <setreg>
-      <!-- CORDIC phase increment word -->
-      <name>CORDIC_FREQ</name>
+      <!-- DDS phase increment word -->
+      <name>DDS_FREQ</name>
       <address>132</address>
     </setreg>
     <setreg>

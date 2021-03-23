@@ -1,26 +1,17 @@
 //
 // Copyright 2011-2012,2014-2016 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-#include "rx_frontend_core_3000.hpp"
-#include "dsp_core_utils.hpp"
+#include <uhd/types/dict.hpp>
+#include <uhd/types/ranges.hpp>
+#include <uhdlib/usrp/cores/rx_frontend_core_3000.hpp>
+#include <uhdlib/usrp/cores/dsp_core_utils.hpp>
 #include <boost/math/special_functions/round.hpp>
 #include <boost/assign/list_of.hpp>
 #include <boost/bind.hpp>
-#include <uhd/types/dict.hpp>
 
 using namespace uhd;
 
@@ -44,10 +35,15 @@ using namespace uhd;
 #define OFFSET_SET   (1ul << 30)
 #define FLAG_MASK (OFFSET_FIXED | OFFSET_SET)
 
+namespace {
+    static const double DC_OFFSET_MIN = -1.0;
+    static const double DC_OFFSET_MAX = 1.0;
+}
+
 using namespace uhd::usrp;
 
-static boost::uint32_t fs_to_bits(const double num, const size_t bits){
-    return boost::int32_t(boost::math::round(num * (1 << (bits-1))));
+static uint32_t fs_to_bits(const double num, const size_t bits){
+    return int32_t(boost::math::round(num * (1 << (bits-1))));
 }
 
 rx_frontend_core_3000::~rx_frontend_core_3000(void){
@@ -82,9 +78,11 @@ public:
     }
 
     void set_fe_connection(const fe_connection_t& fe_conn) {
-        boost::uint32_t mapping_reg_val = 0;
+        uint32_t mapping_reg_val = 0;
         switch (fe_conn.get_sampling_mode()) {
         case fe_connection_t::REAL:
+            mapping_reg_val = FLAG_DSP_RX_MAPPING_REAL_MODE;
+            break;
         case fe_connection_t::HETERODYNE:
             mapping_reg_val = FLAG_DSP_RX_MAPPING_REAL_MODE|FLAG_DSP_RX_MAPPING_REAL_DECIM;
             break;
@@ -118,7 +116,7 @@ public:
         }
         int32_t freq_word;
         get_freq_and_freq_word(cordic_freq, _adc_rate, actual_cordic_freq, freq_word);
-        _iface->poke32(REG_RX_FE_HET_CORDIC_PHASE, boost::uint32_t(freq_word));
+        _iface->poke32(REG_RX_FE_HET_CORDIC_PHASE, uint32_t(freq_word));
 
         _fe_conn = fe_conn;
     }
@@ -137,7 +135,7 @@ public:
         return std::complex<double>(_i_dc_off/scaler, _q_dc_off/scaler);
     }
 
-    void _set_dc_offset(const boost::uint32_t flags) {
+    void _set_dc_offset(const uint32_t flags) {
         _iface->poke32(REG_RX_FE_OFFSET_I, flags | (_i_dc_off & ~FLAG_MASK));
         _iface->poke32(REG_RX_FE_OFFSET_Q, flags | (_q_dc_off & ~FLAG_MASK));
     }
@@ -148,6 +146,9 @@ public:
     }
 
     void populate_subtree(uhd::property_tree::sptr subtree) {
+        subtree->create<uhd::meta_range_t>("dc_offset/range")
+                .set(meta_range_t(DC_OFFSET_MIN, DC_OFFSET_MAX))
+        ;
         subtree->create<std::complex<double> >("dc_offset/value")
             .set(DEFAULT_DC_OFFSET_VALUE)
             .set_coercer(boost::bind(&rx_frontend_core_3000::set_dc_offset, this, _1))
@@ -170,11 +171,10 @@ public:
         default:
             return _adc_rate;
         }
-        return _adc_rate;
     }
 
 private:
-    boost::int32_t  _i_dc_off, _q_dc_off;
+    int32_t  _i_dc_off, _q_dc_off;
     double          _adc_rate;
     fe_connection_t _fe_conn;
     wb_iface::sptr  _iface;

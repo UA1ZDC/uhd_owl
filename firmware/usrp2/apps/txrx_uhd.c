@@ -40,8 +40,6 @@
 #include <string.h>
 #include <stdbool.h>
 
-#include "mdelay.h"
-
 #ifdef BOOTLOADER
 #include <bootloader_utils.h>
 #endif
@@ -313,11 +311,10 @@ main(void)
 {
   u2_init();
   arp_cache_init();
-
 #ifdef BOOTLOADER
-  putstr("\nHello World from SDR Board!\n\nMy Super UDP bootloader! =)\n");
+  putstr("\nUSRP N210 UDP bootloader\n");
 #else
-  putstr("\nTxRx-UHD-ZPU over 7-Series FPGA\n");
+  putstr("\nTxRx-UHD-ZPU\n");
 #endif
   printf("FPGA compatibility number: %d\n", USRP2_FPGA_COMPAT_NUM);
   printf("Firmware compatibility number: %d\n", USRP2_FW_COMPAT_NUM);

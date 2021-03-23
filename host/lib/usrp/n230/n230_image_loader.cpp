@@ -1,18 +1,8 @@
 //
 // Copyright 2016 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include <fstream>
@@ -40,23 +30,23 @@ struct xil_bitfile_hdr_t {
     {}
 
     bool            valid;
-    boost::uint32_t userid;
+    uint32_t userid;
     std::string     product;
     std::string     fpga;
     std::string     timestamp;
-    boost::uint32_t filesize;
+    uint32_t filesize;
 };
 
-static inline boost::uint16_t _to_uint16(boost::uint8_t* buf) {
-    return (static_cast<boost::uint16_t>(buf[0]) << 8) |
-           (static_cast<boost::uint16_t>(buf[1]) << 0);
+static inline uint16_t _to_uint16(uint8_t* buf) {
+    return (static_cast<uint16_t>(buf[0]) << 8) |
+           (static_cast<uint16_t>(buf[1]) << 0);
 }
 
-static inline boost::uint32_t _to_uint32(boost::uint8_t* buf) {
-    return (static_cast<boost::uint32_t>(buf[0]) << 24) |
-           (static_cast<boost::uint32_t>(buf[1]) << 16) |
-           (static_cast<boost::uint32_t>(buf[2]) << 8)  |
-           (static_cast<boost::uint32_t>(buf[3]) << 0);
+static inline uint32_t _to_uint32(uint8_t* buf) {
+    return (static_cast<uint32_t>(buf[0]) << 24) |
+           (static_cast<uint32_t>(buf[1]) << 16) |
+           (static_cast<uint32_t>(buf[2]) << 8)  |
+           (static_cast<uint32_t>(buf[3]) << 0);
 }
 
 static void _parse_bitfile_header(const std::string& filepath, xil_bitfile_hdr_t& hdr) {
@@ -70,9 +60,9 @@ static void _parse_bitfile_header(const std::string& filepath, xil_bitfile_hdr_t
 
     //Parse header
     size_t ptr = 0;
-    boost::uint8_t* buf = reinterpret_cast<boost::uint8_t*>(hdr_buf.get());  //Shortcut
+    uint8_t* buf = reinterpret_cast<uint8_t*>(hdr_buf.get());  //Shortcut
 
-    boost::uint8_t signature[10] = {0x00, 0x09, 0x0f, 0xf0, 0x0f, 0xf0, 0x0f, 0xf0, 0x0f, 0xf0};
+    uint8_t signature[10] = {0x00, 0x09, 0x0f, 0xf0, 0x0f, 0xf0, 0x0f, 0xf0, 0x0f, 0xf0};
     if (memcmp(buf, signature, 10) == 0) {  //Validate signature
         ptr += _to_uint16(buf + ptr) + 2;
         ptr += _to_uint16(buf + ptr) + 1;
@@ -80,7 +70,7 @@ static void _parse_bitfile_header(const std::string& filepath, xil_bitfile_hdr_t
         std::string fields[4];
         for (size_t i = 0; i < 4; i++) {
             size_t key = buf[ptr++] - 'a';
-            boost::uint16_t len = _to_uint16(buf + ptr); ptr += 2;
+            uint16_t len = _to_uint16(buf + ptr); ptr += 2;
             fields[key] = std::string(reinterpret_cast<char*>(buf + ptr), size_t(len)); ptr += len;
         }
 
@@ -108,11 +98,11 @@ static size_t _send_and_recv(
     udp_simple::sptr xport,
     n230_flash_prog_t& out, n230_flash_prog_t& in)
 {
-    static boost::uint32_t seqno = 0;
-    out.seq = htonx<boost::uint32_t>(++seqno);
+    static uint32_t seqno = 0;
+    out.seq = htonx<uint32_t>(++seqno);
     xport->send(boost::asio::buffer(&out, sizeof(n230_flash_prog_t)));
     size_t len = xport->recv(boost::asio::buffer(&in, udp_simple::mtu), 0.5);
-    if (len != sizeof(n230_flash_prog_t) or ntohx<boost::uint32_t>(in.seq) != seqno) {
+    if (len != sizeof(n230_flash_prog_t) or ntohx<uint32_t>(in.seq) != seqno) {
         throw uhd::io_error("Error communicating with the device.");
     }
     return len;
@@ -173,17 +163,17 @@ static bool n230_image_loader(const image_loader::image_loader_args_t &loader_ar
             while (bytes_written < image_size) {
                 size_t payload_size = std::min<size_t>(image_size - bytes_written, N230_FLASH_COMM_MAX_PAYLOAD_SIZE);
                 if (bytes_written % SECTOR_SIZE == 0) {
-                    out.flags = htonx<boost::uint32_t>(N230_FLASH_COMM_FLAGS_ACK|N230_FLASH_COMM_CMD_ERASE_FPGA);
-                    out.offset = htonx<boost::uint32_t>(bytes_written + IMAGE_BASE);
-                    out.size = htonx<boost::uint32_t>(payload_size);
+                    out.flags = htonx<uint32_t>(N230_FLASH_COMM_FLAGS_ACK|N230_FLASH_COMM_CMD_ERASE_FPGA);
+                    out.offset = htonx<uint32_t>(bytes_written + IMAGE_BASE);
+                    out.size = htonx<uint32_t>(payload_size);
                     _send_and_recv(udp_xport, out, in);
                 }
-                out.flags = htonx<boost::uint32_t>(N230_FLASH_COMM_FLAGS_ACK|N230_FLASH_COMM_CMD_WRITE_FPGA);
-                out.offset = htonx<boost::uint32_t>(bytes_written + IMAGE_BASE);
-                out.size = htonx<boost::uint32_t>(payload_size);
+                out.flags = htonx<uint32_t>(N230_FLASH_COMM_FLAGS_ACK|N230_FLASH_COMM_CMD_WRITE_FPGA);
+                out.offset = htonx<uint32_t>(bytes_written + IMAGE_BASE);
+                out.size = htonx<uint32_t>(payload_size);
                 image.read((char*)out.data, payload_size);
                 _send_and_recv(udp_xport, out, in);
-                bytes_written += ntohx<boost::uint32_t>(in.size);
+                bytes_written += ntohx<uint32_t>(in.size);
                 std::cout << boost::format("\r-- Loading FPGA image: %d%%")
                              % (int(double(bytes_written) / double(image_size) * 100.0))
                          << std::flush;

@@ -1,27 +1,17 @@
 //
 // Copyright 2010-2013 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #ifndef INCLUDED_UHD_TRANSPORT_USB_DEVICE_HANDLE_HPP
 #define INCLUDED_UHD_TRANSPORT_USB_DEVICE_HANDLE_HPP
 
 #include <uhd/config.hpp>
-#include <boost/utility.hpp>
+#include <stdint.h>
 #include <boost/shared_ptr.hpp>
-#include <boost/cstdint.hpp>
+#include <boost/utility.hpp>
 #include <vector>
 
 namespace uhd { namespace transport {
@@ -38,10 +28,11 @@ namespace uhd { namespace transport {
  *       a true descriptor serial number string. This interface returns the
  *       actual string descriptor.
  */
-class UHD_API usb_device_handle : boost::noncopyable {
+class UHD_API usb_device_handle : boost::noncopyable
+{
 public:
     typedef boost::shared_ptr<usb_device_handle> sptr;
-    typedef std::pair<boost::uint16_t, boost::uint16_t> vid_pid_pair_t;
+    typedef std::pair<uint16_t, uint16_t> vid_pid_pair_t;
 
     virtual ~usb_device_handle(void);
 
@@ -67,13 +58,13 @@ public:
      * Return the device's Vendor ID (usually assigned by the USB-IF)
      * \return a Vendor ID
      */
-    virtual boost::uint16_t get_vendor_id() const = 0;
+    virtual uint16_t get_vendor_id() const = 0;
 
     /*!
      * Return the device's Product ID (usually assigned by manufacturer)
      * \return a Product ID
      */
-    virtual boost::uint16_t get_product_id() const = 0;
+    virtual uint16_t get_product_id() const = 0;
 
     /*!
      * Test whether the firmware is loaded on the device.
@@ -85,12 +76,14 @@ public:
      * Return a vector of USB devices on this host
      * \return a vector of USB device handles that match vid and pid
      */
-    static std::vector<usb_device_handle::sptr> get_device_list(boost::uint16_t vid, boost::uint16_t pid);
-    static std::vector<usb_device_handle::sptr> get_device_list(const std::vector<usb_device_handle::vid_pid_pair_t>& vid_pid_pair_list);
+    static std::vector<usb_device_handle::sptr> get_device_list(
+        uint16_t vid, uint16_t pid);
+    static std::vector<usb_device_handle::sptr> get_device_list(
+        const std::vector<usb_device_handle::vid_pid_pair_t>& vid_pid_pair_list);
 
 
-}; //namespace usb
+}; // namespace usb
 
-}} //namespace
+}} // namespace uhd::transport
 
 #endif /* INCLUDED_UHD_TRANSPORT_USB_DEVICE_HANDLE_HPP */

@@ -16,14 +16,20 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "ethernet.h"
-#include "eth_phy.h"
-#include "eth_mac.h"
-#include "pic.h"
-#include "hal_io.h"
-#include "nonstdio.h"
+//Changes for USRP2P: status registers different (ethernet.h)
 
-#define VERBOSE 1
+#include "ethernet.h"
+#include "memory_map.h"
+#include "eth_phy.h"
+#include <eth_mac.h>
+#include <pic.h>
+#include <hal_io.h>
+#include <nonstdio.h>
+#include <stdbool.h>
+#include <i2c.h>
+#include "usrp2/fw_common.h"
+
+#define VERBOSE 0
 
 static ethernet_t ed_state;
 static ethernet_link_changed_callback_t ed_callback = 0;
@@ -59,9 +65,13 @@ ed_set_mac_speed(int speed)
 static void
 ed_link_up(int speed)
 {
-   putstr("ed_link_up: "); puthex16_nl(speed);
+  // putstr("ed_link_up: "); puthex16_nl(speed);
 
   ed_set_mac_speed(speed);
+
+	//turn on link LED for USRP2P
+	hal_set_leds(LED_RJ45, LED_RJ45);
+
 
   if (ed_callback)		// fire link changed callback
     (*ed_callback)(speed);
@@ -70,7 +80,10 @@ ed_link_up(int speed)
 static void
 ed_link_down(void)
 {
-   putstr("ed_link_down\n");
+  // putstr("ed_link_down\n");
+
+	//turn off link LED for USRP2P
+	hal_set_leds(0, LED_RJ45);
 
   if (ed_callback)		// fire link changed callback
     (*ed_callback)(0);
@@ -120,30 +133,30 @@ check_flow_control_resolution(void)
 static void
 ed_check_phy_state(void)
 {
-  int lansr = eth_mac_miim_read(PHY_LINK_AN);
+  int phystat = eth_mac_miim_read(PHY_PHY_STATUS);
   eth_link_state_t new_state = LS_UNKNOWN;
   int new_speed = S_UNKNOWN;
 
   if (VERBOSE){
-	    putstr("LANSR: ");
-	    puthex16_nl(lansr);
+    putstr("PHYSTAT: ");
+    puthex16_nl(phystat);
   }
 
-  if (lansr & LANSR_LINK_GOOD){		// link's up
+  if (phystat & PHYSTAT_LINK){		// link's up
     if (VERBOSE)
       puts("  LINK_GOOD");
 
     new_state = LS_UP;
-    switch (lansr & LANSR_SPEED_MASK){
-    case LANSR_SPEED_10:
+    switch (phystat & PHYSTAT_SPEED_MASK){
+    case PHYSTAT_SPEED_10:
       new_speed = 10;
       break;
       
-    case LANSR_SPEED_100:
+    case PHYSTAT_SPEED_100:
       new_speed = 100;
       break;
       
-    case LANSR_SPEED_1000:
+    case PHYSTAT_SPEED_1000:
       new_speed = 1000;
       break;
 
@@ -182,7 +195,8 @@ static void
 eth_phy_irq_handler(unsigned irq)
 {
   ed_check_phy_state();
-  eth_mac_miim_write(PHY_INT_CLEAR, ~0);	// clear all ints
+  eth_mac_miim_read(PHY_INT_STATUS);
+//  eth_mac_miim_write(PHY_INT_CLEAR, ~0);	// clear all ints
 }
 
 void
@@ -210,17 +224,17 @@ ethernet_init(void)
   // setup PHY to interrupt on changes
 
   unsigned mask =
-    (PHY_INT_AN_CMPL		// auto-neg completed
-     | PHY_INT_NO_LINK		// no link after auto-neg
-     | PHY_INT_NO_HCD		// no highest common denominator
-     | PHY_INT_MAS_SLA_ERR	// couldn't resolve master/slave 
-     | PHY_INT_PRL_DET_FLT	// parallel detection fault
-     | PHY_INT_LNK_CNG		// link established or broken
-     | PHY_INT_SPD_CNG		// speed changed
+    (PHY_INT_ENABLE       //master interrupt enable
+     | PHY_INT_LINK_STATUS_CHANGE
+     | PHY_INT_RX_STATUS_CHANGE
      );
 
-  eth_mac_miim_write(PHY_INT_CLEAR, ~0);	// clear all pending interrupts
+  eth_mac_miim_read(PHY_INT_STATUS); //clear interrupts
   eth_mac_miim_write(PHY_INT_MASK, mask);	// enable the ones we want
+
+	//set the LED behavior to activity instead of link
+	unsigned led = (LED_ACTIVITY << PHY_LED_LINK_LSB) | (LED_TX << PHY_LED_TXRX_LSB);
+	eth_mac_miim_write(PHY_LED2, led);
 
   pic_register_handler(IRQ_PHY, eth_phy_irq_handler);
 

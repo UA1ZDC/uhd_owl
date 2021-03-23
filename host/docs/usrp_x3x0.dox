@@ -15,9 +15,10 @@ More information:
 	- Dual SFP+ Transceivers (can be used with 1 GigE, 10 GigE)
 	- PCI Express over cable (MXI) gen1 x4
 	- External PPS input & output
-	- External 10 MHz input & output
+	- External reference (10 MHz, 11.52 MHz, 23.04 MHz, or 30.72 MHz) input & output
 	- Expandable via 2nd SFP+ interface
 	- Supported master clock rates: 200 MHz and 184.32 MHz
+        - Variable daughterboard clock rates
 	- External GPIO Connector with UHD API control
 	- External USB Connection for built-in JTAG debugger
 	- Internal GPSDO option
@@ -27,7 +28,6 @@ More information:
 	- 2 TX DUC chain in FPGA
 	- Timed commands in FPGA
 	- Timed sampling in FPGA
-	- 16-bit and 8-bit sample modes (sc8 and sc16)
 	- Up to 120 MHz of RF bandwidth with 16-bit samples
 
 \section x3x0_getting_started Getting started
@@ -111,7 +111,7 @@ ready for development!
 
 - Prior to installing the module, the host PC can remain powered on.
 - Plug a 1 Gigabit SFP Transceiver into Ethernet Port 0 on the USRP X300/X310 device.
-- Use the Ethernet cable to connect the SFP+ transciever on the device to the host computer. For maximum throughput, Ettus Research recommends that you connect each device to its own dedicated Gigabit Ethernet interface on the host computer.
+- Use the Ethernet cable to connect the SFP+ transceiver on the device to the host computer. For maximum throughput, Ettus Research recommends that you connect each device to its own dedicated Gigabit Ethernet interface on the host computer.
 - Connect the AC/DC power supply to the device and plug the supply into a wall outlet.
 - The OS will automatically recognize the device (e.g. when running `uhd_find_devices`).
 
@@ -148,6 +148,13 @@ Ethernet interfaces with the maximum rate of 200 Msps per channel:
 
 The second interface is specified by the extra argument <b>second_addr</b>.
 
+### DPDK Support
+
+To enable the highest streaming rates over the network, X310 supports using
+transports based on the \subpage page_dpdk "Data Plane Development Kit (DPDK)".
+See the DPDK page for details on how it can improve streaming and how to use
+it.
+
 \subsection x3x0_hw_pcie PCI Express (Desktop)
 
 <b>Important Note: The USRP X-Series provides PCIe connectivity over MXI cable.
@@ -156,7 +163,7 @@ We will use the 'MXI' nomenclature for the rest of this manual.</b>
 ### Installing the PCIe Kernel Drivers
 
 In order to use the USRP X-Series on a PCIe-over-MXI connection, you need to
-install the NI RIO drivers on your system. Please follow the insructions here:
+install the NI RIO drivers on your system. Please follow the instructions here:
 \ref page_ni_rio_kernel
 
 ### Installing the PCI Express Interface Kit
@@ -197,7 +204,7 @@ We will use the 'MXI' nomenclature for the rest of this manual.</b>
 ### Installing the PCIe Kernel Drivers
 
 In order to use the USRP X-Series on a PCIe-over-MXI connection, you need to
-install the NI RIO drivers on your system. Please follow the insructions here:
+install the NI RIO drivers on your system. Please follow the instructions here:
 \ref page_ni_rio_kernel
 
 ### Installing the PCI Express Card
@@ -225,23 +232,16 @@ To connect to this JTAG device, simply connect your computer to the USB JTAG
 port on the front of the X3x0 device. You may now use the JTAG programmer in
 the same way you would use any other, including:
 
+- Vivado (standard workflow, see below)
 - <a href="http://www.xilinx.com/support/download/index.htm">Xilinx Programming Tools (ISE, iMPACT)</a>
 - <a href="http://www.xilinx.com/tools/cspro.htm">Xilinx Chipscope</a>
 - <a href="https://www.digilentinc.com/Products/Detail.cfm?NavPath=2,66,828&Prod=ADEPT2">Digilent ADEPT</a>
 
-In order to use the JTAG programmer with the Xilinx tools, the Digilent drivers and plugin have to be installed first.
-Although recent versions of ISE ship with the driver, it has to still be manually installed.
+In order to use the JTAG programmer with the Xilinx tools, the Digilent drivers and plugin have to be installed first. Although recent versions of Vivado ship with the driver, it has to still be manually installed.
 
-\b Note: Sometimes the ISE shipped versions are newer than the ones available via Digilent's website. It is therefore advisable to
-use the ISE provided plugin and drivers.
+To install first locate your Vivado installation path on a Linux system (default is `/opt/Xilinx/Vivado/<Version>`):
 
-To install first locate your ISE installation path on a Linux system (default is `/opt/Xilinx/<Version>`):
-
-    sudo <ise install path>/ISE_DS/common/bin/lin64/digilent/install_digilent.sh
-
-Afterwards either reboot or force udev to reload its rules by:
-
-    sudo udevadm control --reload
+    sudo `find /opt/Xilinx/Vivado/<Version> -name install_digilent.sh`
 
 The USRP-X series device should now be usable with all the tools mentioned above.
 
@@ -303,9 +303,16 @@ that the requested image is already loaded onto the FPGA then it will not reload
 \subsection x3x0_load_fpga_imgs_jtag Use JTAG to load FPGA images
 
 The USRP-X Series device features an on-board USB-JTAG programmer that can be accessed on the front-panel
-of the device. The iMPACT tool in the <a href="http://www.xilinx.com/support/download/index.htm">Xilinx Programming Tools (ISE, iMPACT)</a> package can be used to load an image over the JTAG interface. This can be useful for unbricking devices.
+of the device. There are multiple tools available to access the FPGA through the JTAG connector (see \ref x3x0_jtag).
 
-If you have iMPACT installed, you can use the `impact_jtag_programmer.sh` tool to install images. Make sure your X3x0 is powered on and connected to your computer using the front panel USB JTAG connector (USB 2.0 is fine for this). Then run the tool:
+If you have Vivado installed, we provide a command-line script to flash images. Make sure your X3x0 is powered on and connected to your computer using the front panel USB JTAG connector (USB 2.0 is fine for this). Head to the X3x0 FPGA directory, then run the following commands:
+
+    $ cd uhd/fpga-src/usrp3/top/x300 # Assuming this is where the FPGA code is checked out
+    $ source ./setupenv.sh
+    $ viv_jtag_program /path/to/bitfile.bit
+
+
+If you have iMPACT installed, you can use the `impact_jtag_programmer.sh` tool to install images. Then run the tool:
 
     <path_to_uhd_tools>/impact_jtag_programmer.sh --fpga-path=<fpga_image_path>
 
@@ -430,6 +437,73 @@ Run the following commands:
 
 You must power-cycle the device before you can use this new address.
 
+\section x3x0_setup_clocking Setup Clocking
+
+\subsection x3x0_set_clocking_mboard Motherboard clock
+
+The X300 series generates a master clock on the motherboard, which is then used
+to drive the ADCs, DACs, and the radio blocks. This clock rate is referred to as
+the "master clock rate". There is always a single master clock rate per
+motherboard. This rate is also the base sample rate of the radio blocks. By
+using DDC and DUC blocks (these are part of the default X300/X310 FPGA image),
+the actual sampling rate available to your application can be an integer divisor
+of the master clock rate, so for a 200 MHz master clock rate, the sampling rate
+available to the application can be 200 Msps, 100 Msps, 66.6 Msps, 50 Msps, and
+so on.
+
+The X300 series support a 200 MHz and a 184.32 MHz master clock rate, with
+200 MHz being the default. To specify a master clock rate, use the
+`master_clock_rate` device arg at initialization time. Example:
+~~~{.cpp}
+auto usrp = uhd::usrp::multi_usrp::make("type=x300,master_clock_rate=184.32e6");
+usrp->set_rx_rate(30e6); // This will coerce to the next possible value
+// The next possible value is 30.72e6, which is 184.32e6 / 6
+std::cout << usrp->get_rx_rate() << std::endl; // Prints 30.72e6
+~~~
+
+\b Note: The X300 series does not support the
+`uhd::usrp::multi_usrp::set_master_clock_rate()` API call, because it can only
+configure the clock at initialization time, but not afterwards. To switch the
+master clock rate, destroy your USRP object, and recreate a new one. Example:
+~~~{.cpp}
+// 1. Create USRP object with 184.32 MHz master clock rate
+auto usrp = uhd::usrp::multi_usrp::make("type=x300,master_clock_rate=184.32e6");
+// 2. Destroy the reference
+usrp.reset();
+// 3. Recreate the object with a 200 MHz master clock rate
+usrp = uhd::usrp::multi_usrp::make("type=x300,master_clock_rate=200e6");
+~~~
+Due to the contract of `uhd::usrp::multi_usrp::set_master_clock_rate()`, the
+call will not throw an exception, but will coerce to the previously set master
+clock rate. Effectively, it will do nothing but print a warning (but it won't
+terminate your application). Also note that the return value of said API call
+as well as the associated getter will always return accurate values. Example:
+~~~{.cpp}
+auto usrp = uhd::usrp::multi_usrp::make("type=x300,master_clock_rate=200e6");
+double desired_rate = 184.32e6;
+// This call does nothing:
+usrp->set_master_clock_rate(desired_rate);
+// At this point, desired_rate does not actually store the correct rate!
+// This prints the correct rate:
+std::cout << usrp->get_master_clock_rate() << std::endl; // Prints 200e6
+~~~
+
+
+\subsection x3x0_set_clocking_dboard Daughterboard clock
+
+The X3x0 provides a clock signal to the daughterboards which is used as a
+reference clock for synthesizers and other components that require clocks.
+There are daughterboards that require non-default clock values. See
+Section \ref config_devaddr on how to change the clock value, and \ref page_dboards
+for information specific to certain daughterboards.
+
+Not all combinations of daughterboards work within the same device, if
+daughterboard clock requirements conflict. Note that some daughterboards
+will try and set the daughterboard clock rate themselves. Refer to the
+<a href="https://kb.ettus.com/X300/X310#Choosing_an_RF_Daughterboard">Ettus Research
+Knowledge Base article on the X300/X310</a> for more information on daughterboard
+compatibilty.
+
 \section x3x0_addressing Addressing the Device
 
 \subsection x3x0_addressing_singledev Single device configuration
@@ -465,13 +539,14 @@ Example device address string representation for 2 USRPs with IPv4 addresses **1
 
 See also \ref page_multiple.
 
-\section x3x0_comm_problems Communication Problems
+\section x3x0_troubleshooting Troubleshooting
+\subsection x3x0_comm_issues Communication Issues
 
 When setting up a development machine for the first time,
 you may have various difficulties communicating with the USRP device.
 The following tips are designed to help narrow down and diagnose the problem.
 
-\subsection x3x0_comm_problems_runtimeerr RuntimeError: no control response
+\subsection x3x0_comm_issues_runtimeerr RuntimeError: no control response
 
 This is a common error that occurs when you have set the subnet of your network
 interface to a different subnet than the network interface of the USRP device.  For
@@ -483,7 +558,7 @@ Fixing this is simple - just set the your host PC's IP address to the same
 subnet as that of your USRP device. Instructions for setting your IP address are in the
 previous section of this documentation.
 
-\subsection x3x0_comm_problems_firewall Firewall issues
+\subsection x3x0_comm_issues_firewall Firewall Issues
 
 When the IP address is not specified,
 the device discovery broadcasts UDP packets from each Ethernet interface.
@@ -494,14 +569,14 @@ then your firewall may be blocking replies to UDP broadcast packets.
 If this is the case, we recommend that you disable the firewall
 or create a rule to allow all incoming packets with UDP source port **49152**.
 
-\subsection x3x0_comm_problems_ping Ping the device
+\subsection x3x0_comm_issues_ping Ping the device
 The USRP device will reply to ICMP echo requests ("ping").
 A successful ping response means that the device has booted properly
 and that it is using the expected IP address.
 
     ping 192.168.10.2
 
-\subsection x3x0_comm_problems_not_enumerated Device not enumerated over PCI-Express (Linux)
+\subsection x3x0_comm_issues_not_enumerated Device not enumerated over PCI-Express (Linux)
 
 UHD requires the RIO device manager service to be running in order to
 communicate with an X-Series USRP over PCIe.  This service is installed as
@@ -531,7 +606,7 @@ A device similar to the following should be detected:
     - NI-USRP 295xR: 772F, 77FE, 7730, 77FF, 7731, 7800, 7732, 7857, 785E, 7858, 785F, 7859, 7860 or 785A
 
 
-\subsection x3x0_comm_problems_not_enumerated_win Device not enumerated over PCI-Express (Windows)
+\subsection x3x0_comm_issues_not_enumerated_win Device not enumerated over PCI-Express (Windows)
 
 UHD requires the RIO device manager service to be running in order to
 communicate with an X-Series USRP over PCIe.
@@ -543,15 +618,13 @@ status of **niusrpriorpc** is "Running".
 If the device still does not enumerate after starting the device manager, make sure that the host computer
 has successfully detected it. You can do so by checking if your device shows up in the Windows Device Manager.
 
-\subsection x3x0_comm_problems_monitor Monitor the host network traffic
+\subsection x3x0_comm_issues_monitor Monitor the host network traffic
 Use Wireshark to monitor packets sent to and received from the device.
 
 \subsection x3x0_comm_problems_leds Observe Ethernet port LEDs
 When there is network traffic arriving at the Ethernet port, LEDs will light up.
 You can use this to make sure the network connection is correctly set up, e.g.
 by pinging the USRP and making sure the LEDs start to blink.
-
-\section x3x0_usage_problems Usage Problems
 
 \subsection x3x0_corrupt_eeprom Corrupt EEPROM
 
@@ -597,13 +670,29 @@ Afterward, power-cycle your X-Series device for the changes to take effect.
 - **PPS/TRIG IN**: Input port for the PPS signal
 - **GPS**: Connection for the GPS antenna
 
-\subsection x3x0_hw_x3x0_hw_ref10M Ref Clock - 10 MHz
+\subsection x3x0_hw_x3x0_hw_ref10M Ref Clock (10 MHz or other frequency)
 
 Using an external 10 MHz reference clock, a square wave will offer the best phase
-noise performance, but a sinusoid is acceptable.  The power level of the reference clock cannot exceed +15 dBm.
+noise performance, but a sinusoid is acceptable.
+The power level of the reference clock must exceed +15 dBm.
+
+The following reference frequencies are supported:
+- 10 MHz
+- 11.52 MHz
+- 23.04 MHz
+- 30.72 MHz
+
+If the external reference clock is not 10 MHz, the `system_ref_rate` device arg
+must be provided.
+
+To use the external reference in your UHD session, make sure to either call
+uhd::usrp::multi_usrp::set_clock_source() or specify `clock_source=external` in
+your device args.
 
 \subsection x3x0_hw_pps PPS - Pulse Per Second
-Using a PPS signal for timestamp synchronization requires a square wave signal with the following a 5Vpp amplitude.
+
+Using a PPS signal for timestamp synchronization requires a square wave signal
+with a 5Vpp amplitude.
 
 To test the PPS input, you can use the following tool from the UHD examples:
 
@@ -611,6 +700,10 @@ To test the PPS input, you can use the following tool from the UHD examples:
 
     cd <install-path>/lib/uhd/examples
     ./test_pps_input --args=\<args\>
+
+To use the external time source in your UHD session, make sure to either call
+uhd::usrp::multi_usrp::set_time_source() or specify `time_source=external` in
+your device args.
 
 \subsection x3x0_hw_gpsdo Internal GPSDO
 

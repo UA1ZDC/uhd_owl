@@ -1,18 +1,8 @@
 //
 // Copyright 2015-2016 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #ifndef INCLUDED_UHD_USRP_H
@@ -30,6 +20,8 @@
 #include <uhd/usrp/mboard_eeprom.h>
 #include <uhd/usrp/dboard_eeprom.h>
 #include <uhd/usrp/subdev_spec.h>
+/* version.hpp is safe to include in C: */
+#include <uhd/version.hpp> /* Provides UHD_VERSION */
 
 #include <stdbool.h>
 #include <stdlib.h>
@@ -91,7 +83,7 @@ typedef struct {
     //! Stream now?
     bool stream_now;
     //! If not now, then full seconds into future to stream
-    time_t time_spec_full_secs;
+    int64_t time_spec_full_secs;
     //! If not now, then fractional seconds into future to stream
     double time_spec_frac_secs;
 } uhd_stream_cmd_t;
@@ -424,7 +416,7 @@ UHD_API uhd_error uhd_usrp_get_mboard_name(
 UHD_API uhd_error uhd_usrp_get_time_now(
     uhd_usrp_handle h,
     size_t mboard,
-    time_t *full_secs_out,
+    int64_t *full_secs_out,
     double *frac_secs_out
 );
 
@@ -435,7 +427,7 @@ UHD_API uhd_error uhd_usrp_get_time_now(
 UHD_API uhd_error uhd_usrp_get_time_last_pps(
     uhd_usrp_handle h,
     size_t mboard,
-    time_t *full_secs_out,
+    int64_t *full_secs_out,
     double *frac_secs_out
 );
 
@@ -445,7 +437,7 @@ UHD_API uhd_error uhd_usrp_get_time_last_pps(
  */
 UHD_API uhd_error uhd_usrp_set_time_now(
     uhd_usrp_handle h,
-    time_t full_secs,
+    int64_t full_secs,
     double frac_secs,
     size_t mboard
 );
@@ -456,7 +448,7 @@ UHD_API uhd_error uhd_usrp_set_time_now(
  */
 UHD_API uhd_error uhd_usrp_set_time_next_pps(
     uhd_usrp_handle h,
-    time_t full_secs,
+    int64_t full_secs,
     double frac_secs,
     size_t mboard
 );
@@ -467,7 +459,7 @@ UHD_API uhd_error uhd_usrp_set_time_next_pps(
  */
 UHD_API uhd_error uhd_usrp_set_time_unknown_pps(
     uhd_usrp_handle h,
-    time_t full_secs,
+    int64_t full_secs,
     double frac_secs
 );
 
@@ -483,7 +475,7 @@ UHD_API uhd_error uhd_usrp_get_time_synchronized(
  */
 UHD_API uhd_error uhd_usrp_set_command_time(
     uhd_usrp_handle h,
-    time_t full_secs,
+    int64_t full_secs,
     double frac_secs,
     size_t mboard
 );
@@ -1027,6 +1019,80 @@ UHD_API uhd_error uhd_usrp_get_fe_tx_freq_range(
     uhd_meta_range_handle freq_range_out
 );
 
+//! Get a list of possible LO stage names
+/*
+ * See uhd::usrp::multi_usrp::get_tx_lo_names() for more details.
+ */
+UHD_API uhd_error uhd_usrp_get_tx_lo_names(
+    uhd_usrp_handle h,
+    size_t chan,
+    uhd_string_vector_handle *tx_lo_names_out
+);
+
+//! Set the LO source for the USRP device
+/*
+ * See uhd::usrp::multi_usrp::set_tx_lo_source() for more details.
+ */
+UHD_API uhd_error uhd_usrp_set_tx_lo_source(
+    uhd_usrp_handle h,
+    const char* src,
+    const char* name,
+    size_t chan
+);
+
+//! Get the currently set LO source
+UHD_API uhd_error uhd_usrp_get_tx_lo_source(
+    uhd_usrp_handle h,
+    const char* name,
+    size_t chan,
+    char* tx_lo_source_out,
+    size_t strbuffer_len
+);
+
+//! Get a list of possible LO sources
+UHD_API uhd_error uhd_usrp_get_tx_lo_sources(
+    uhd_usrp_handle h,
+    const char* name,
+    size_t chan,
+    uhd_string_vector_handle *tx_lo_sources_out
+);
+
+//! Set whether the LO used by the USRP device is exported
+/*
+ * See uhd::usrp::multi_usrp::set_tx_lo_enabled() for more details.
+ */
+UHD_API uhd_error uhd_usrp_set_tx_lo_export_enabled(
+    uhd_usrp_handle h,
+    bool enabled,
+    const char* name,
+    size_t chan
+);
+
+//! Returns true if the currently selected LO is being exported.
+UHD_API uhd_error uhd_usrp_get_tx_lo_export_enabled(
+    uhd_usrp_handle h,
+    const char* name,
+    size_t chan,
+    bool* result_out
+);
+
+//! Set the Tx LO frequency.
+UHD_API uhd_error uhd_usrp_set_tx_lo_freq(
+    uhd_usrp_handle h,
+    double freq,
+    const char* name,
+    size_t chan,
+    double* coerced_freq_out
+);
+
+//! Get the current Tx LO frequency.
+UHD_API uhd_error uhd_usrp_get_tx_lo_freq(
+    uhd_usrp_handle h,
+    const char* name,
+    size_t chan,
+    double* tx_lo_freq_out
+);
+
 //! Set the TX gain for the given channel and name
 UHD_API uhd_error uhd_usrp_set_tx_gain(
     uhd_usrp_handle h,
@@ -1134,23 +1200,6 @@ UHD_API uhd_error uhd_usrp_get_tx_sensor_names(
     uhd_usrp_handle h,
     size_t chan,
     uhd_string_vector_handle *sensor_names_out
-);
-
-//! Enable or disable TX DC offset correction for the given channel
-/*!
- * See uhd::usrp::multi_usrp::set_tx_dc_offset() for more details.
- */
-UHD_API uhd_error uhd_usrp_set_tx_dc_offset_enabled(
-    uhd_usrp_handle h,
-    bool enb,
-    size_t chan
-);
-
-//! Enable or disable TX IQ imbalance correction for the given channel
-UHD_API uhd_error uhd_usrp_set_tx_iq_balance_enabled(
-    uhd_usrp_handle h,
-    bool enb,
-    size_t chan
 );
 
 /****************************************************************************

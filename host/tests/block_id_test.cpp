@@ -1,28 +1,19 @@
 //
 // Copyright 2014 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-#include <iostream>
-#include <boost/test/unit_test.hpp>
 #include <uhd/exception.hpp>
 #include <uhd/rfnoc/block_id.hpp>
+#include <boost/test/unit_test.hpp>
+#include <iostream>
 
 using namespace uhd::rfnoc;
 
-BOOST_AUTO_TEST_CASE(test_block_id) {
+BOOST_AUTO_TEST_CASE(test_block_id)
+{
     BOOST_CHECK(block_id_t::is_valid_block_id("00/Filter_1"));
     BOOST_CHECK(not block_id_t::is_valid_block_id("0/MAG_SQUARE"));
     BOOST_CHECK(block_id_t::is_valid_blockname("FilterFoo"));
@@ -55,7 +46,8 @@ BOOST_AUTO_TEST_CASE(test_block_id) {
 
     BOOST_CHECK(not block_id.set_block_name("Foo_Bar"));
     BOOST_CHECK_EQUAL(block_id.get_device_no(), 17);
-    BOOST_CHECK_EQUAL(block_id.get_block_name(), "FooBar"); // Is unchanged because invalid
+    BOOST_CHECK_EQUAL(
+        block_id.get_block_name(), "FooBar"); // Is unchanged because invalid
     BOOST_CHECK_EQUAL(block_id.get_block_count(), 11);
 
     block_id++;
@@ -92,7 +84,8 @@ BOOST_AUTO_TEST_CASE(test_block_id) {
     BOOST_CHECK(not other_block_id.match("2093ksdjfflsdkjf"));
 }
 
-BOOST_AUTO_TEST_CASE(test_block_id_set) {
+BOOST_AUTO_TEST_CASE(test_block_id_set)
+{
     // test set()
     block_id_t block_id_for_set(5, "Blockname", 9);
     block_id_for_set.set("FirFilter");
@@ -109,9 +102,10 @@ BOOST_AUTO_TEST_CASE(test_block_id_set) {
     BOOST_CHECK_EQUAL(block_id_for_set.get_block_count(), 3);
 }
 
-BOOST_AUTO_TEST_CASE(test_block_id_cmp) {
+BOOST_AUTO_TEST_CASE(test_block_id_cmp)
+{
     BOOST_CHECK(block_id_t("0/FFT_1") == block_id_t("0/FFT_1"));
     BOOST_CHECK(block_id_t("0/FFT_1") != block_id_t("1/FFT_1"));
     BOOST_CHECK(block_id_t("0/FFT_1") < block_id_t("1/aaaaaaaaa_0"));
-    BOOST_CHECK(not (block_id_t("0/FFT_1") > block_id_t("1/aaaaaaaaa_0")));
+    BOOST_CHECK(not(block_id_t("0/FFT_1") > block_id_t("1/aaaaaaaaa_0")));
 }

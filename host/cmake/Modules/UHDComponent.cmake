@@ -1,148 +1,156 @@
 #
 # Copyright 2010-2011,2013,2015 Ettus Research LLC
+# Copyright 2018 Ettus Research, a National Instruments Company
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 
 ########################################################################
-SET(_uhd_enabled_components "" CACHE INTERNAL "" FORCE)
-SET(_uhd_disabled_components "" CACHE INTERNAL "" FORCE)
+set(_uhd_enabled_components "" CACHE INTERNAL "" FORCE)
+set(_uhd_disabled_components "" CACHE INTERNAL "" FORCE)
 
 ########################################################################
 # Register a component into the system
-#  - name the component string name
-#  - var the global enable variable
-#  - enb the default enable setting
-#  - deps a list of dependencies
-#  - dis the default disable setting
+#  - name the component string name ("FOO")
+#  - var the global enable variable (ENABLE_FOO)
+#  - enb the default enable setting (ON)
+#  - deps a list of dependencies (DEPENDENCY_FOUND)
+#  - dis the default disable setting (OFF)
 #  - req fail if dependencies not met (unless specifically disabled)
+#
+# In parentheses are examples. If you specify those, we register a component
+# "FOO" which is enabled by calling CMake with -DENABLE_FOO=ON. It defaults to
+# ON, unless DEPENDENCY_FOUND is false, in which case it becomes false.
 ########################################################################
-MACRO(LIBUHD_REGISTER_COMPONENT name var enb deps dis req)
-    MESSAGE(STATUS "")
-    MESSAGE(STATUS "Configuring ${name} support...")
-    FOREACH(dep ${deps})
-        MESSAGE(STATUS "  Dependency ${dep} = ${${dep}}")
-    ENDFOREACH(dep)
+macro(LIBUHD_REGISTER_COMPONENT name var enb deps dis req)
+    message(STATUS "")
+    message(STATUS "Configuring ${name} support...")
+    foreach(dep ${deps})
+        message(STATUS "  Dependency ${dep} = ${${dep}}")
+    endforeach(dep)
 
-    #if user specified option, store here
-    IF("${${var}}" STREQUAL "OFF")
-        SET(user_disabled TRUE)
-    ELSE()
-        SET(user_disabled FALSE)
-    ENDIF("${${var}}" STREQUAL "OFF")
+    # If user specified option, store here. Note: If the user doesn't specify
+    # this option on the cmake command line, both user_enabled and
+    # user_disabled will be false!
+    if("${${var}}" STREQUAL "OFF")
+        set(user_disabled TRUE)
+    else()
+        set(user_disabled FALSE)
+    endif("${${var}}" STREQUAL "OFF")
+    if("${${var}}" STREQUAL "ON")
+        set(user_enabled TRUE)
+    else()
+        set(user_enabled FALSE)
+    endif("${${var}}" STREQUAL "ON")
 
     #setup the dependent option for this component
-    INCLUDE(CMakeDependentOption)
+    include(CMakeDependentOption)
     CMAKE_DEPENDENT_OPTION(${var} "enable ${name} support" ${enb} "${deps}" ${dis})
 
-    #if a required option's dependencies aren't met, fail unless user specifies otherwise
-    IF(NOT ${var} AND ${req} AND NOT user_disabled)
-        MESSAGE(FATAL_ERROR "Dependencies for required component ${name} not met.")
-    ENDIF(NOT ${var} AND ${req} AND NOT user_disabled)
+    # There are two failure cases:
+    # 1) The user requested this component explicitly (-DENABLE_FOO=ON) but the
+    #    requirements are not met.
+    # 2) The user did not explicitly turn off this component (-DENABLE_FOO=OFF)
+    #    but it is flagged as required by ${req}
+    if(NOT ${var} AND user_enabled) # Case 1)
+        message(FATAL_ERROR "Dependencies for required component ${name} not met.")
+    endif(NOT ${var} AND user_enabled)
+    if(NOT ${var} AND ${req} AND NOT user_disabled) # Case 2)
+        message(FATAL_ERROR "Dependencies for required component ${name} not met.")
+    endif(NOT ${var} AND ${req} AND NOT user_disabled)
 
     #append the component into one of the lists
-    IF(${var})
-        MESSAGE(STATUS "  Enabling ${name} support.")
-        LIST(APPEND _uhd_enabled_components ${name})
-    ELSE(${var})
-        MESSAGE(STATUS "  Disabling ${name} support.")
-        LIST(APPEND _uhd_disabled_components ${name})
-    ENDIF(${var})
-    MESSAGE(STATUS "  Override with -D${var}=ON/OFF")
+    if(${var})
+        message(STATUS "  Enabling ${name} support.")
+        list(APPEND _uhd_enabled_components ${name})
+    else(${var})
+        message(STATUS "  Disabling ${name} support.")
+        list(APPEND _uhd_disabled_components ${name})
+    endif(${var})
+    message(STATUS "  Override with -D${var}=ON/OFF")
 
     #make components lists into global variables
-    SET(_uhd_enabled_components ${_uhd_enabled_components} CACHE INTERNAL "" FORCE)
-    SET(_uhd_disabled_components ${_uhd_disabled_components} CACHE INTERNAL "" FORCE)
-ENDMACRO(LIBUHD_REGISTER_COMPONENT)
+    set(_uhd_enabled_components ${_uhd_enabled_components} CACHE INTERNAL "" FORCE)
+    set(_uhd_disabled_components ${_uhd_disabled_components} CACHE INTERNAL "" FORCE)
+endmacro(LIBUHD_REGISTER_COMPONENT)
 
 ########################################################################
 # Install only if appropriate for package and if component is enabled
 ########################################################################
-FUNCTION(UHD_INSTALL)
+function(UHD_INSTALL)
     include(CMakeParseArgumentsCopy)
-    CMAKE_PARSE_ARGUMENTS(UHD_INSTALL "" "DESTINATION;COMPONENT" "TARGETS;FILES;PROGRAMS" ${ARGN})
+    cmake_parse_arguments(UHD_INSTALL "" "DESTINATION;COMPONENT" "TARGETS;FILES;PROGRAMS" ${ARGN})
 
-    IF(UHD_INSTALL_FILES)
-        SET(TO_INSTALL "${UHD_INSTALL_FILES}")
-    ELSEIF(UHD_INSTALL_PROGRAMS)
-        SET(TO_INSTALL "${UHD_INSTALL_PROGRAMS}")
-    ELSEIF(UHD_INSTALL_TARGETS)
-        SET(TO_INSTALL "${UHD_INSTALL_TARGETS}")
-    ENDIF(UHD_INSTALL_FILES)
+    if(UHD_INSTALL_FILES)
+        set(TO_INSTALL "${UHD_INSTALL_FILES}")
+    elseif(UHD_INSTALL_PROGRAMS)
+        set(TO_INSTALL "${UHD_INSTALL_PROGRAMS}")
+    elseif(UHD_INSTALL_TARGETS)
+        set(TO_INSTALL "${UHD_INSTALL_TARGETS}")
+    endif(UHD_INSTALL_FILES)
 
-    IF(UHD_INSTALL_COMPONENT STREQUAL "headers")
-        IF(NOT LIBUHD_PKG AND NOT UHDHOST_PKG)
-            INSTALL(${ARGN})
-        ENDIF(NOT LIBUHD_PKG AND NOT UHDHOST_PKG)
-    ELSEIF(UHD_INSTALL_COMPONENT STREQUAL "devel")
-        IF(NOT LIBUHD_PKG AND NOT UHDHOST_PKG)
-            INSTALL(${ARGN})
-        ENDIF(NOT LIBUHD_PKG AND NOT UHDHOST_PKG)
-    ELSEIF(UHD_INSTALL_COMPONENT STREQUAL "examples")
-        IF(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
-            INSTALL(${ARGN})
-        ENDIF(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
-    ELSEIF(UHD_INSTALL_COMPONENT STREQUAL "tests")
-        IF(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
-            INSTALL(${ARGN})
-        ENDIF(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
-    ELSEIF(UHD_INSTALL_COMPONENT STREQUAL "utilities")
-        IF(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
-            INSTALL(${ARGN})
-        ENDIF(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
-    ELSEIF(UHD_INSTALL_COMPONENT STREQUAL "manual")
-        IF(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
-            INSTALL(${ARGN})
-        ENDIF(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
-    ELSEIF(UHD_INSTALL_COMPONENT STREQUAL "doxygen")
-        IF(NOT LIBUHD_PKG AND NOT UHDHOST_PKG)
-            INSTALL(${ARGN})
-        ENDIF(NOT LIBUHD_PKG AND NOT UHDHOST_PKG)
-    ELSEIF(UHD_INSTALL_COMPONENT STREQUAL "manpages")
-        IF(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
-            INSTALL(${ARGN})
-        ENDIF(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
-    ELSEIF(UHD_INSTALL_COMPONENT STREQUAL "images")
-        IF(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG AND NOT UHDHOST_PKG)
-            INSTALL(${ARGN})
-        ENDIF(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG AND NOT UHDHOST_PKG)
-    ELSEIF(UHD_INSTALL_COMPONENT STREQUAL "readme")
-        IF(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG AND NOT UHDHOST_PKG)
-            INSTALL(${ARGN})
-        ENDIF(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG AND NOT UHDHOST_PKG)
-    ENDIF(UHD_INSTALL_COMPONENT STREQUAL "headers")
-ENDFUNCTION(UHD_INSTALL)
+    if(UHD_INSTALL_COMPONENT STREQUAL "headers")
+        if(NOT LIBUHD_PKG AND NOT UHDHOST_PKG)
+            install(${ARGN})
+        endif(NOT LIBUHD_PKG AND NOT UHDHOST_PKG)
+    elseif(UHD_INSTALL_COMPONENT STREQUAL "devel")
+        if(NOT LIBUHD_PKG AND NOT UHDHOST_PKG)
+            install(${ARGN})
+        endif(NOT LIBUHD_PKG AND NOT UHDHOST_PKG)
+    elseif(UHD_INSTALL_COMPONENT STREQUAL "examples")
+        if(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
+            install(${ARGN})
+        endif(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
+    elseif(UHD_INSTALL_COMPONENT STREQUAL "tests")
+        if(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
+            install(${ARGN})
+        endif(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
+    elseif(UHD_INSTALL_COMPONENT STREQUAL "utilities")
+        if(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
+            install(${ARGN})
+        endif(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
+    elseif(UHD_INSTALL_COMPONENT STREQUAL "manual")
+        if(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
+            install(${ARGN})
+        endif(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
+    elseif(UHD_INSTALL_COMPONENT STREQUAL "doxygen")
+        if(NOT LIBUHD_PKG AND NOT UHDHOST_PKG)
+            install(${ARGN})
+        endif(NOT LIBUHD_PKG AND NOT UHDHOST_PKG)
+    elseif(UHD_INSTALL_COMPONENT STREQUAL "manpages")
+        if(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
+            install(${ARGN})
+        endif(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG)
+    elseif(UHD_INSTALL_COMPONENT STREQUAL "images")
+        if(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG AND NOT UHDHOST_PKG)
+            install(${ARGN})
+        endif(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG AND NOT UHDHOST_PKG)
+    elseif(UHD_INSTALL_COMPONENT STREQUAL "readme")
+        if(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG AND NOT UHDHOST_PKG)
+            install(${ARGN})
+        endif(NOT LIBUHD_PKG AND NOT LIBUHDDEV_PKG AND NOT UHDHOST_PKG)
+    endif(UHD_INSTALL_COMPONENT STREQUAL "headers")
+endfunction(UHD_INSTALL)
 
 ########################################################################
 # Print the registered component summary
 ########################################################################
-FUNCTION(UHD_PRINT_COMPONENT_SUMMARY)
-    MESSAGE(STATUS "")
-    MESSAGE(STATUS "######################################################")
-    MESSAGE(STATUS "# UHD enabled components                              ")
-    MESSAGE(STATUS "######################################################")
-    FOREACH(comp ${_uhd_enabled_components})
-        MESSAGE(STATUS "  * ${comp}")
-    ENDFOREACH(comp)
+function(UHD_PRINT_COMPONENT_SUMMARY)
+    message(STATUS "")
+    message(STATUS "######################################################")
+    message(STATUS "# UHD enabled components                              ")
+    message(STATUS "######################################################")
+    foreach(comp ${_uhd_enabled_components})
+        message(STATUS "  * ${comp}")
+    endforeach(comp)
 
-    MESSAGE(STATUS "")
-    MESSAGE(STATUS "######################################################")
-    MESSAGE(STATUS "# UHD disabled components                             ")
-    MESSAGE(STATUS "######################################################")
-    FOREACH(comp ${_uhd_disabled_components})
-        MESSAGE(STATUS "  * ${comp}")
-    ENDFOREACH(comp)
+    message(STATUS "")
+    message(STATUS "######################################################")
+    message(STATUS "# UHD disabled components                             ")
+    message(STATUS "######################################################")
+    foreach(comp ${_uhd_disabled_components})
+        message(STATUS "  * ${comp}")
+    endforeach(comp)
 
-    MESSAGE(STATUS "")
-ENDFUNCTION(UHD_PRINT_COMPONENT_SUMMARY)
+    message(STATUS "")
+endfunction(UHD_PRINT_COMPONENT_SUMMARY)

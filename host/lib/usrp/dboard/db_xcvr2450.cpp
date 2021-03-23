@@ -1,18 +1,8 @@
 //
 // Copyright 2010-2012 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 // TX IO Pins
@@ -60,9 +50,10 @@
 #include <uhd/usrp/dboard_manager.hpp>
 #include <boost/assign/list_of.hpp>
 #include <boost/format.hpp>
-#include <boost/thread.hpp>
 #include <boost/math/special_functions/round.hpp>
 #include <utility>
+#include <chrono>
+#include <thread>
 
 using namespace uhd;
 using namespace uhd::usrp;
@@ -133,11 +124,11 @@ private:
 
     void update_atr(void);
     void spi_reset(void);
-    void send_reg(boost::uint8_t addr){
-        boost::uint32_t value = _max2829_regs.get_reg(addr);
-        UHD_LOGV(often) << boost::format(
+    void send_reg(uint8_t addr){
+        uint32_t value = _max2829_regs.get_reg(addr);
+        UHD_LOGGER_TRACE("XCVR2450") << boost::format(
             "XCVR2450: send reg 0x%02x, value 0x%05x"
-        ) % int(addr) % value << std::endl;
+        ) % int(addr) % value ;
         this->get_iface()->write_spi(
             dboard_iface::UNIT_RX,
             spi_config_t::EDGE_RISE,
@@ -221,7 +212,7 @@ xcvr2450::xcvr2450(ctor_args_t args) : xcvr_dboard_base(args){
     _max2829_regs.tx_upconv_linearity = max2829_regs_t::TX_UPCONV_LINEARITY_78;
 
     //send initial register settings
-    for(boost::uint8_t reg = 0x2; reg <= 0xC; reg++){
+    for(uint8_t reg = 0x2; reg <= 0xC; reg++){
         this->send_reg(reg);
     }
 
@@ -234,7 +225,7 @@ xcvr2450::xcvr2450(ctor_args_t args) : xcvr_dboard_base(args){
         .set_publisher(boost::bind(&xcvr2450::get_locked, this));
     this->get_rx_subtree()->create<sensor_value_t>("sensors/rssi")
         .set_publisher(boost::bind(&xcvr2450::get_rssi, this));
-    BOOST_FOREACH(const std::string &name, xcvr_rx_gain_ranges.keys()){
+    for(const std::string &name:  xcvr_rx_gain_ranges.keys()){
         this->get_rx_subtree()->create<double>("gains/"+name+"/value")
             .set_coercer(boost::bind(&xcvr2450::set_rx_gain, this, _1, name))
             .set(xcvr_rx_gain_ranges[name].start());
@@ -270,7 +261,7 @@ xcvr2450::xcvr2450(ctor_args_t args) : xcvr_dboard_base(args){
         .set("XCVR2450 TX");
     this->get_tx_subtree()->create<sensor_value_t>("sensors/lo_locked")
         .set_publisher(boost::bind(&xcvr2450::get_locked, this));
-    BOOST_FOREACH(const std::string &name, xcvr_tx_gain_ranges.keys()){
+    for(const std::string &name:  xcvr_tx_gain_ranges.keys()){
         this->get_tx_subtree()->create<double>("gains/"+name+"/value")
             .set_coercer(boost::bind(&xcvr2450::set_tx_gain, this, _1, name))
             .set(xcvr_tx_gain_ranges[name].start());
@@ -317,11 +308,11 @@ void xcvr2450::spi_reset(void){
     //spi reset mode: global enable = off, tx and rx enable = on
     this->get_iface()->set_atr_reg(dboard_iface::UNIT_TX, gpio_atr::ATR_REG_IDLE, TX_ENB_TXIO);
     this->get_iface()->set_atr_reg(dboard_iface::UNIT_RX, gpio_atr::ATR_REG_IDLE, RX_ENB_RXIO | POWER_DOWN_RXIO);
-    boost::this_thread::sleep(boost::posix_time::milliseconds(10));
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
     //take it back out of spi reset mode and wait a bit
     this->get_iface()->set_atr_reg(dboard_iface::UNIT_RX, gpio_atr::ATR_REG_IDLE, RX_DIS_RXIO | POWER_UP_RXIO);
-    boost::this_thread::sleep(boost::posix_time::milliseconds(10));
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
 }
 
 /***********************************************************************
@@ -358,7 +349,7 @@ double xcvr2450::set_lo_freq(double target_freq){
     double actual = 0.0;
     for (double offset = 0.0; offset <= 3e6; offset+=1e6){
         actual = this->set_lo_freq_core(target_freq + offset);
-        boost::this_thread::sleep(boost::posix_time::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
         if (this->get_locked().to_bool()) break;
     }
     return actual;
@@ -372,7 +363,7 @@ double xcvr2450::set_lo_freq_core(double target_freq){
     //variables used in the calculation below
     double scaler = xcvr2450::is_highband(target_freq)? (4.0/5.0) : (4.0/3.0);
     double ref_freq = this->get_iface()->get_codec_rate(dboard_iface::UNIT_TX);
-    int R, intdiv, fracdiv;
+    int R, intdiv = 131, fracdiv = 0;
 
     //loop through values until we get a match
     for(_ad9515div = 2; _ad9515div <= 3; _ad9515div++){
@@ -391,20 +382,20 @@ double xcvr2450::set_lo_freq_core(double target_freq){
     double N = double(intdiv) + double(fracdiv)/double(1 << 16);
     _lo_freq = (N*ref_freq)/(scaler*R*_ad9515div);
 
-    UHD_LOGV(often)
+    UHD_LOGGER_TRACE("XCVR2450")
         << boost::format("XCVR2450 tune:\n")
         << boost::format("    R=%d, N=%f, ad9515=%d, scaler=%f\n") % R % N % _ad9515div % scaler
         << boost::format("    Ref    Freq=%fMHz\n") % (ref_freq/1e6)
         << boost::format("    Target Freq=%fMHz\n") % (target_freq/1e6)
         << boost::format("    Actual Freq=%fMHz\n") % (_lo_freq/1e6)
-        << std::endl;
+        ;
 
     //high-high band or low-high band?
     if(_lo_freq > (5.35e9 + 5.47e9)/2.0){
-        UHD_LOGV(often) << "XCVR2450 tune: Using  high-high band" << std::endl;
+        UHD_LOGGER_TRACE("XCVR2450") << "XCVR2450 tune: Using  high-high band" ;
         _max2829_regs.band_select_802_11a = max2829_regs_t::BAND_SELECT_802_11A_5_47GHZ_TO_5_875GHZ;
     }else{
-        UHD_LOGV(often) << "XCVR2450 tune: Using  low-high band" << std::endl;
+        UHD_LOGGER_TRACE("XCVR2450") << "XCVR2450 tune: Using  low-high band" ;
         _max2829_regs.band_select_802_11a = max2829_regs_t::BAND_SELECT_802_11A_4_9GHZ_TO_5_35GHZ;
     }
 
@@ -655,9 +646,9 @@ double xcvr2450::set_rx_bandwidth(double bandwidth){
     //update register
     send_reg(0x7);
 
-    UHD_LOGV(often) << boost::format(
+    UHD_LOGGER_TRACE("XCVR2450") << boost::format(
         "XCVR2450 RX Bandwidth (lp_fc): %f Hz, coarse reg: %d, fine reg: %d"
-    ) % _rx_bandwidth % (int(_max2829_regs.rx_lpf_coarse_adj)) % (int(_max2829_regs.rx_lpf_fine_adj)) << std::endl;
+    ) % _rx_bandwidth % (int(_max2829_regs.rx_lpf_coarse_adj)) % (int(_max2829_regs.rx_lpf_fine_adj)) ;
 
     return 2.0*_rx_bandwidth;
 }
@@ -675,9 +666,9 @@ double xcvr2450::set_tx_bandwidth(double bandwidth){
     //update register
     send_reg(0x7);
 
-    UHD_LOGV(often) << boost::format(
+    UHD_LOGGER_TRACE("XCVR2450") << boost::format(
         "XCVR2450 TX Bandwidth (lp_fc): %f Hz, coarse reg: %d"
-    ) % _tx_bandwidth % (int(_max2829_regs.tx_lpf_coarse_adj)) << std::endl;
+    ) % _tx_bandwidth % (int(_max2829_regs.tx_lpf_coarse_adj)) ;
 
     //convert lowpass back to complex bandpass bandwidth
     return 2.0*_tx_bandwidth;

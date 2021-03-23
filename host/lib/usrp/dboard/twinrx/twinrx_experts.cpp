@@ -1,23 +1,14 @@
 //
 // Copyright 2016 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include "twinrx_experts.hpp"
 #include "twinrx_gain_tables.hpp"
 #include <uhd/utils/math.hpp>
+#include <uhd/utils/log.hpp>
 #include <uhd/exception.hpp>
 #include <uhd/types/dict.hpp>
 #include <uhd/types/ranges.hpp>
@@ -28,6 +19,17 @@
 using namespace uhd::experts;
 using namespace uhd::math;
 using namespace uhd::usrp::dboard::twinrx;
+
+/*!---------------------------------------------------------
+ * twinrx_scheduling_expert::resolve
+ * ---------------------------------------------------------
+ */
+void twinrx_scheduling_expert::resolve()
+{
+    // Currently a straight pass-through. To be expanded as needed
+    // when more advanced scheduling is needed
+    _rx_frontend_time = _command_time;
+}
 
 /*!---------------------------------------------------------
  * twinrx_freq_path_expert::resolve
@@ -222,6 +224,19 @@ void twinrx_freq_coercion_expert::resolve()
  */
 void twinrx_nyquist_expert::resolve()
 {
+    // Do not execute when clear_command_time is called.
+    // This is a transition of the command time from non-zero to zero.
+    if (_rx_frontend_time == time_spec_t(0.0) and _cached_cmd_time != time_spec_t(0.0)) {
+        _cached_cmd_time = _rx_frontend_time;
+        return;
+    }
+
+    // Do not execute twice for the same command time unless untimed
+    if (_rx_frontend_time == _cached_cmd_time and _rx_frontend_time != time_spec_t(0.0)) {
+        return;
+    }
+    _cached_cmd_time = _rx_frontend_time;
+
     double if_freq_sign = 1.0;
     if (_lo1_inj_side == INJ_HIGH_SIDE) if_freq_sign *= -1.0;
     if (_lo2_inj_side == INJ_HIGH_SIDE) if_freq_sign *= -1.0;
@@ -284,17 +299,18 @@ void twinrx_lo_config_expert::resolve()
         ("internal",  twinrx_ctrl::LO_INTERNAL)
         ("external",  twinrx_ctrl::LO_EXTERNAL)
         ("companion", twinrx_ctrl::LO_COMPANION)
-        ("disabled",  twinrx_ctrl::LO_DISABLED);
+        ("disabled",  twinrx_ctrl::LO_DISABLED)
+        ("reimport",  twinrx_ctrl::LO_REIMPORT);
 
     if (src_lookup.has_key(_lo_source_ch0)) {
         _lo1_src_ch0 = _lo2_src_ch0 = src_lookup[_lo_source_ch0];
     } else {
-        throw uhd::value_error("Invalid LO source for channel 0.Choose from {internal, external, companion}");
+        throw uhd::value_error("Invalid LO source for channel 0.Choose from {internal, external, companion, reimport}");
     }
     if (src_lookup.has_key(_lo_source_ch1)) {
         _lo1_src_ch1 = _lo2_src_ch1 = src_lookup[_lo_source_ch1];
     } else {
-        throw uhd::value_error("Invalid LO source for channel 1.Choose from {internal, external, companion}");
+        throw uhd::value_error("Invalid LO source for channel 1.Choose from {internal, external, companion, reimport}");
     }
 
     twinrx_ctrl::lo_export_source_t export_src = twinrx_ctrl::LO_EXPORT_DISABLED;
@@ -304,14 +320,16 @@ void twinrx_lo_config_expert::resolve()
     if (_lo_export_ch1 and (_lo_source_ch1 == "external")) {
         throw uhd::value_error("Cannot export an external LO for channel 1");
     }
+
+    // Determine which channel will provide the exported LO
     if (_lo_export_ch0 and _lo_export_ch1) {
         throw uhd::value_error("Cannot export LOs for both channels");
     } else if (_lo_export_ch0) {
-        export_src = (_lo1_src_ch0 == twinrx_ctrl::LO_INTERNAL) ?
-            twinrx_ctrl::LO_CH1_SYNTH : twinrx_ctrl::LO_CH2_SYNTH;
-    } else if (_lo_export_ch1) {
-        export_src = (_lo1_src_ch1 == twinrx_ctrl::LO_INTERNAL) ?
+        export_src = (_lo1_src_ch0 == twinrx_ctrl::LO_COMPANION) ?
             twinrx_ctrl::LO_CH2_SYNTH : twinrx_ctrl::LO_CH1_SYNTH;
+    } else if (_lo_export_ch1) {
+        export_src = (_lo1_src_ch1 == twinrx_ctrl::LO_COMPANION) ?
+            twinrx_ctrl::LO_CH1_SYNTH : twinrx_ctrl::LO_CH2_SYNTH;
     }
     _lo1_export_src = _lo2_export_src = export_src;
 }
@@ -326,14 +344,16 @@ void twinrx_lo_mapping_expert::resolve()
     static const size_t CH1_MSK = 0x2;
 
     // Determine which channels are "driving" each synthesizer
-    // First check for explicit requests i.e. lo_source "internal" or "companion"
+    // First check for explicit requests
+    // "internal" or "reimport" -> this channel
+    // "companion" -> other channel
     size_t synth_map[] = {0, 0};
-    if (_lox_src_ch0 == twinrx_ctrl::LO_INTERNAL) {
+    if (_lox_src_ch0 == twinrx_ctrl::LO_INTERNAL or _lox_src_ch0 == twinrx_ctrl::LO_REIMPORT) {
         synth_map[0] = synth_map[0] | CH0_MSK;
     } else if (_lox_src_ch0 == twinrx_ctrl::LO_COMPANION) {
         synth_map[1] = synth_map[1] | CH0_MSK;
     }
-    if (_lox_src_ch1 == twinrx_ctrl::LO_INTERNAL) {
+    if (_lox_src_ch1 == twinrx_ctrl::LO_INTERNAL or _lox_src_ch1 == twinrx_ctrl::LO_REIMPORT) {
         synth_map[1] = synth_map[1] | CH1_MSK;
     } else if (_lox_src_ch1 == twinrx_ctrl::LO_COMPANION) {
         synth_map[0] = synth_map[0] | CH1_MSK;
@@ -345,7 +365,7 @@ void twinrx_lo_mapping_expert::resolve()
     // to overlap tuning with signal dwell time.
     bool hopping_enabled = false;
     if (_lox_src_ch0 == twinrx_ctrl::LO_DISABLED) {
-        if (_lox_src_ch1 == twinrx_ctrl::LO_INTERNAL) {
+        if (_lox_src_ch1 == twinrx_ctrl::LO_INTERNAL or _lox_src_ch1 == twinrx_ctrl::LO_REIMPORT) {
             synth_map[0] = synth_map[0] | CH0_MSK;
             hopping_enabled = true;
         } else if (_lox_src_ch1 == twinrx_ctrl::LO_COMPANION) {
@@ -354,7 +374,7 @@ void twinrx_lo_mapping_expert::resolve()
         }
     }
     if (_lox_src_ch1 == twinrx_ctrl::LO_DISABLED) {
-        if (_lox_src_ch0 == twinrx_ctrl::LO_INTERNAL) {
+        if (_lox_src_ch0 == twinrx_ctrl::LO_INTERNAL or _lox_src_ch0 == twinrx_ctrl::LO_REIMPORT) {
             synth_map[1] = synth_map[1] | CH1_MSK;
             hopping_enabled = true;
         } else if (_lox_src_ch0 == twinrx_ctrl::LO_COMPANION) {
@@ -457,7 +477,7 @@ void twinrx_ant_gain_expert::resolve()
             (_ch0_preamp2 != _ch1_preamp2) or
             (_ch0_lb_preamp_presel != _ch1_lb_preamp_presel))
         {
-            UHD_MSG(warning) << "incompatible gain settings for antenna sharing. temporarily using Ch0 settings for Ch1.";
+            UHD_LOGGER_WARNING("TWINRX") << "incompatible gain settings for antenna sharing. temporarily using Ch0 settings for Ch1.";
         }
         _ant0_input_atten       = _ch0_input_atten;
         _ant0_preamp1           = _ch0_preamp1;
@@ -475,7 +495,7 @@ void twinrx_ant_gain_expert::resolve()
             (_ch0_preamp2 != _ch1_preamp2) or
             (_ch0_lb_preamp_presel != _ch1_lb_preamp_presel))
         {
-            UHD_MSG(warning) << "incompatible gain settings for antenna sharing. temporarily using Ch0 settings for Ch1.";
+            UHD_LOGGER_WARNING("TWINRX") << "incompatible gain settings for antenna sharing. temporarily using Ch0 settings for Ch1.";
         }
         _ant1_input_atten       = _ch0_input_atten;
         _ant1_preamp1           = _ch0_preamp1;
@@ -523,6 +543,10 @@ void twinrx_settings_expert::resolve()
         _ctrl->set_hb_atten(ch, ch_set.hb_atten, FORCE_COMMIT);
         _ctrl->set_lo1_source(ch, ch_set.lo1_source, FORCE_COMMIT);
         _ctrl->set_lo2_source(ch, ch_set.lo2_source, FORCE_COMMIT);
+        ch_set.lo1_charge_pump_c =
+            _ctrl->set_lo1_charge_pump(ch, ch_set.lo1_charge_pump_d, FORCE_COMMIT);
+        ch_set.lo2_charge_pump_c =
+            _ctrl->set_lo2_charge_pump(ch, ch_set.lo2_charge_pump_d, FORCE_COMMIT);
     }
 
     _resolve_lox_freq(STAGE_LO1,
@@ -570,10 +594,6 @@ void twinrx_settings_expert::_resolve_lox_freq(
             ch0_freq_c = _set_lox_synth_freq(lo_stage, twinrx_ctrl::CH2, ch0_freq_d);
         } else if (synth0_mapping == MAPPING_SHARED or synth1_mapping == MAPPING_SHARED) {
             // If any synthesizer is being shared then we are not in hopping mode
-            if (rf_freq_ppm_t(ch0_freq_d) != ch1_freq_d) {
-                UHD_MSG(warning) <<
-                    "Incompatible RF/LO frequencies for LO sharing. Using Ch0 settings for both channels.";
-            }
             twinrx_ctrl::channel_t ch = (synth0_mapping == MAPPING_SHARED) ? twinrx_ctrl::CH1 : twinrx_ctrl::CH2;
             ch0_freq_c = _set_lox_synth_freq(lo_stage, ch, ch0_freq_d);
             ch1_freq_c = ch0_freq_c;
@@ -597,10 +617,6 @@ void twinrx_settings_expert::_resolve_lox_freq(
             ch1_freq_c = _set_lox_synth_freq(lo_stage, twinrx_ctrl::CH2, ch1_freq_d);
         } else if (synth0_mapping == MAPPING_SHARED or synth1_mapping == MAPPING_SHARED) {
             // If any synthesizer is being shared then we are not in hopping mode
-            if (rf_freq_ppm_t(ch0_freq_d) != ch1_freq_d) {
-                UHD_MSG(warning) <<
-                    "Incompatible RF/LO frequencies for LO sharing. Using Ch0 settings for both channels.";
-            }
             twinrx_ctrl::channel_t ch = (synth0_mapping == MAPPING_SHARED) ? twinrx_ctrl::CH1 : twinrx_ctrl::CH2;
             ch0_freq_c = _set_lox_synth_freq(lo_stage, ch, ch0_freq_d);
             ch1_freq_c = ch0_freq_c;

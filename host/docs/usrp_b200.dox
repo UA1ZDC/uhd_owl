@@ -39,10 +39,36 @@ images:
 
     fw=usrp_b200_fw.hex
 
+\section b200_customfpga Custom FPGA images and accessing user settings
+
+The FPGA image is provided in source code and can thus be modified and rebuilt
+to serve custom purposes. For example, additional filtering or other DSP
+operations can be inserted into the FPGA before or after the DAC or ADC stages,
+respectively. Refer to the \ref md_fpga "FPGA Manual" for further information on
+how to rebuild the FPGA.
+
+To control user-defined IP, the `USER_SETTINGS` parameter for the `radio_legacy`
+block in `b200_core.v` (for B210 and B200) or `b205_core.v` (for the mini
+series) need to be set to 1, and radio_legacy.v can then be modified to include
+user-defined read and write registers (the file includes examples on how to do
+that).
+Any customizations will most likely also be applied in radio_legacy.v.
+
+For FPGA images that include user settings registers, UHD provides APIs to
+interface with those. To enable access to user settings, apply the
+`enable_user_regs` device argument on initialization. Then, use the
+uhd::multi_usrp::get_user_settings_iface API call to access an object that
+allows modifying the registers. Example:
+~~~{.cpp}
+auto usrp = multi_usrp::make("type=b200,enable_user_regs");
+auto user_regs = usrp->get_user_settings_iface();
+user_regs->poke32(addr, data);
+~~~
+
 \section b200_mcr Changing the Master Clock Rate
 
 The master clock rate feeds the RF frontends and the DSP chains. Users
-may select non-default clock rates to acheive integer decimations or
+may select non-default clock rates to achieve integer decimation rates or
 interpolations in the DSP chains. The clock rate can be set to any value
 between 5 MHz and 61.44 MHz (or 30.72 MHz for dual-channel mode).
 Note that rates above 56 MHz are possible, but not recommended.
@@ -92,8 +118,8 @@ frontends share the TX LO. Each LO is tunable between 50 MHz and 6 GHz.
 \subsection b200_fe_gain Frontend gain
 
 All frontends have individual analog gain controls. The receive
-frontends have 73 dB of available gain; and the transmit frontends have
-89.5 dB of available gain. Gain settings are application specific, but
+frontends have 76 dB of available gain; and the transmit frontends have
+89.8 dB of available gain. Gain settings are application specific, but
 it is recommended that users consider using at least half of the
 available gain to get reasonable dynamic range.
 
@@ -115,9 +141,9 @@ The property to control the analog RX bandwidth is `bandwidth/value`.
 UHD will not allow you to set bandwidths larger than your current master clock
 rate.
 
-\section Hardware Reference
+\section b200_hw_ref Hardware Reference
 
-\subsection LED Indicators
+\subsection b200_hw_ref_leds LED Indicators
 
 Below is a table of the B200/B210 LED indicators and their meanings:
 
@@ -126,9 +152,9 @@ Below is a table of the B200/B210 LED indicators and their meanings:
     <th>Component ID</th><th>Description</th><th>Details</th>
   </tr>
   <tr>
-    <td>LED600</td> <td>Power Indicator</td> <td>off = no power applied<br>
-                                                 red = external power applied<br>
-                                                 blue(red prior to rev 6) = USB power applied</td>
+    <td>LED600</td> <td>Power Indicator</td> <td>off = no power applied (before rev6, some rev6) / external power applied and not yet initialized (most rev6)<br>
+                                                 blue = USB power applied (before rev6) / power supplied (USB) OR power supplied (external) (rev6)<br/>
+						 red = external power applied (before rev6) / external power applied and device initialized (rev6)</td>
   </tr>
   <tr>
     <td>LED800</td> <td>Channel 2 RX2 Activity</td> <td>off = no power applied<br>
@@ -194,7 +220,7 @@ condition, indicating that the host is not sending or receiving samples fast
 enough.  The host will be notified of the condition and output a "U" or "O" as
 well.
 
-\subsection External Connections
+\subsection b200_hw_ref_ext  External Connections
 
 Below is a table showing the B200/B210 external connections and respective power information:
 
@@ -268,7 +294,7 @@ Component ID            |  Description               | Details
 
 <sup>1</sup> Only on the B210
 
-<sup>2</sup> Only since rev. 6 (green board)
+<sup>2</sup> Only since rev. 6 (green board).  GPIO pinout is 1=GPIO_0, 2=GPIO_1, 3=GPIO_2, 4=GPIO_3, 5=GPIO_4, 6=GPIO_5, 7=GPIO_6, 8=GPIO_7, 9=GND, 10=GND
 
 Below is a table showing the B200mini on-board connectors and switches:
 
@@ -278,7 +304,18 @@ Component ID            |  Description               | Details
  J6<sup>1</sup>         |  GPIO Header               | Header connected to the FPGA for GPIO purposes.
  SW1                    |  FX3 Hard Reset Switch     | Resets the USB controller / System reset
 
- <sup>1</sup> GPIO pinout is 1=3.3V, 2=GPIO_0, 3=GPIO_1, 4=GPIO_2, 5=GPIO_3, 6=GND, 7=3.3V, 8=GPIO_4, 9=GPIO_5, 10=,GPIO_6 11=GPIO_7, 12=GND
+ <sup>1</sup> GPIO pinout is 1=3.3V, 2=GPIO_0, 3=GPIO_1, 4=GPIO_2, 5=GPIO_3, 6=GND, 7=3.3V, 8=GPIO_4, 9=GPIO_5, 10=GPIO_6, 11=GPIO_7, 12=GND
+
+\section b200_known_issues Known issues
+
+- The B200 and B210 cannot support an external 10 MHz reference if a GPSDO is
+  already present on the motherboard. If an external 10 MHz reference is to be
+  used, the GPSDO needs to be physically removed from the device beforehand.
+
+- The default streaming settings do not work optimally for all use cases. If
+  there are issues with performance or stability, it can help to modify the
+  `recv_frame_size` values, e.g., by setting `recv_frame_size=1024` as part of
+  the device args.
 
 */
 

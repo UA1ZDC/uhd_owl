@@ -1,24 +1,14 @@
 #
 # Copyright 2010-2015 Ettus Research LLC
+# Copyright 2018 Ettus Research, a National Instruments Company
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-License-Identifier: GPL-3.0
 #
 
 ########################################################################
 # example applications
 ########################################################################
-SET(example_sources
+set(example_sources
     benchmark_rate.cpp
     network_relay.cpp
     rx_multi_samples.cpp
@@ -34,43 +24,58 @@ SET(example_sources
     tx_timed_samples.cpp
     tx_waveforms.cpp
     txrx_loopback_to_file.cpp
+    usrp_list_sensors.cpp
     latency_test.cpp
     gpio.cpp
     sync_to_gps.cpp
 )
 
-IF(ENABLE_OCTOCLOCK)
-    LIST(APPEND example_sources test_clock_synch.cpp)
-ENDIF(ENABLE_OCTOCLOCK)
+if(ENABLE_RFNOC)
+    list(APPEND
+        example_sources
+        rfnoc_nullsource_ce_rx.cpp
+        rfnoc_rx_to_file.cpp
+        rfnoc_radio_loopback.cpp
+        benchmark_streamer.cpp
+    )
+endif(ENABLE_RFNOC)
+
+if(ENABLE_OCTOCLOCK)
+    list(APPEND example_sources test_clock_synch.cpp)
+endif(ENABLE_OCTOCLOCK)
 
 #for each source: build an executable and install
-FOREACH(example_source ${example_sources})
-    GET_FILENAME_COMPONENT(example_name ${example_source} NAME_WE)
-    ADD_EXECUTABLE(${example_name} ${example_source})
-    TARGET_LINK_LIBRARIES(${example_name} uhd ${Boost_LIBRARIES})
+foreach(example_source ${example_sources})
+    get_filename_component(example_name ${example_source} NAME_WE)
+    add_executable(${example_name} ${example_source})
+    target_link_libraries(${example_name} uhd ${Boost_LIBRARIES})
     UHD_INSTALL(TARGETS ${example_name} RUNTIME DESTINATION ${PKG_LIB_DIR}/examples COMPONENT examples)
-ENDFOREACH(example_source)
+endforeach(example_source)
 
 ########################################################################
 # ASCII Art DFT - requires curses, so this part is optional
 ########################################################################
-FIND_PACKAGE(Curses)
+find_package(Curses)
 
-IF(CURSES_FOUND)
-    INCLUDE_DIRECTORIES(${CURSES_INCLUDE_DIR})
-    ADD_EXECUTABLE(rx_ascii_art_dft rx_ascii_art_dft.cpp)
-    TARGET_LINK_LIBRARIES(rx_ascii_art_dft uhd ${CURSES_LIBRARIES} ${Boost_LIBRARIES})
+if(CURSES_FOUND)
+    include_directories(${CURSES_INCLUDE_DIR})
+    add_executable(rx_ascii_art_dft rx_ascii_art_dft.cpp)
+    target_link_libraries(rx_ascii_art_dft uhd ${CURSES_LIBRARIES} ${Boost_LIBRARIES})
     UHD_INSTALL(TARGETS rx_ascii_art_dft RUNTIME DESTINATION ${PKG_LIB_DIR}/examples COMPONENT examples)
-ENDIF(CURSES_FOUND)
+
+    add_executable(twinrx_freq_hopping twinrx_freq_hopping.cpp)
+    target_link_libraries(twinrx_freq_hopping uhd ${CURSES_LIBRARIES} ${Boost_LIBRARIES})
+    UHD_INSTALL(TARGETS twinrx_freq_hopping RUNTIME DESTINATION ${PKG_LIB_DIR}/examples COMPONENT examples)
+endif(CURSES_FOUND)
 
 ########################################################################
 # Examples using C API
 ########################################################################
-IF(ENABLE_C_API)
+if(ENABLE_C_API)
     #
     # Check if this particular C99 feature is available with this compiler
     #
-    INCLUDE(CheckCSourceCompiles)
+    include(CheckCSourceCompiles)
     CHECK_C_SOURCE_COMPILES("
     typedef struct {
         int bar;
@@ -88,22 +93,26 @@ IF(ENABLE_C_API)
     }
     " HAVE_C99_STRUCTDECL)
 
-    IF(HAVE_C99_STRUCTDECL)
-        ADD_SUBDIRECTORY(getopt)
-        INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/getopt)
+    if(HAVE_C99_STRUCTDECL)
+        add_subdirectory(getopt)
+        include_directories(${CMAKE_CURRENT_SOURCE_DIR}/getopt)
 
-        SET(C_API_EXAMPLES
+        set(C_API_EXAMPLES
             rx_samples_c
             tx_samples_c
         )
 
-        FOREACH(example ${C_API_EXAMPLES})
-            ADD_EXECUTABLE(${example} ${example}.c)
-            TARGET_LINK_LIBRARIES(${example} uhd getopt)
-            IF(UNIX)
-                TARGET_LINK_LIBRARIES(${example} m)
-            ENDIF(UNIX)
+        foreach(example ${C_API_EXAMPLES})
+            add_executable(${example} ${example}.c)
+            target_link_libraries(${example} uhd getopt)
+            if(UNIX)
+                target_link_libraries(${example} m)
+            endif(UNIX)
             UHD_INSTALL(TARGETS ${example} RUNTIME DESTINATION ${PKG_LIB_DIR}/examples COMPONENT examples)
-        ENDFOREACH(example ${C_API_EXAMPLES})
-    ENDIF(HAVE_C99_STRUCTDECL)
-ENDIF(ENABLE_C_API)
+        endforeach(example ${C_API_EXAMPLES})
+    endif(HAVE_C99_STRUCTDECL)
+endif(ENABLE_C_API)
+
+if(ENABLE_PYTHON_API)
+    add_subdirectory(python)
+endif(ENABLE_PYTHON_API)

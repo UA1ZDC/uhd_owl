@@ -1,22 +1,12 @@
 //
 // Copyright 2015 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-#include "ihex.hpp"
 #include <uhd/exception.hpp>
+#include <uhdlib/utils/ihex.hpp>
 #include <boost/format.hpp>
 #include <boost/make_shared.hpp>
 #include <sstream>
@@ -59,9 +49,9 @@ static bool checksum(const std::string& record)
  */
 static bool parse_record(
         const std::string& record,
-        boost::uint16_t &len,
-        boost::uint16_t &addr,
-        boost::uint16_t &type,
+        uint16_t &len,
+        uint16_t &addr,
+        uint16_t &type,
         unsigned char* data
 ) {
     unsigned int i;
@@ -98,16 +88,16 @@ void ihex_reader::read(ihex_reader::record_handle_type record_handler)
     const char *filename = _ihex_filename.c_str();
 
     /* Fields used in every record. */
-    boost::uint16_t len = 0;
-    boost::uint16_t type = 0;
-    boost::uint16_t lower_address_bits = 0x0000;
+    uint16_t len = 0;
+    uint16_t type = 0;
+    uint16_t lower_address_bits = 0x0000;
     static const int MAX_RECORD_LENGTH = 255;
     unsigned char data[MAX_RECORD_LENGTH];
 
     /* Can be set by the Intel HEX record 0x04, used for all 0x00 records
      * thereafter. Note this field takes the place of the 'index' parameter in
      * libusb calls, and is necessary for FX3's 32-bit addressing. */
-    boost::uint16_t upper_address_bits = 0x0000;
+    uint16_t upper_address_bits = 0x0000;
 
     std::ifstream file;
     file.open(filename, std::ifstream::in);
@@ -117,7 +107,7 @@ void ihex_reader::read(ihex_reader::record_handle_type record_handler)
     }
 
     while (!file.eof()) {
-        boost::int32_t ret = 0;
+        int32_t ret = 0;
         std::string record;
         file >> record;
 
@@ -156,8 +146,8 @@ void ihex_reader::read(ihex_reader::record_handle_type record_handler)
                 throw uhd::io_error("ihex_reader::read(): For ELA record, address must be 0, length must be 2.");
             }
 
-            upper_address_bits = ((boost::uint16_t)((data[0] & 0x00FF) << 8))\
-                                 + ((boost::uint16_t)(data[1] & 0x00FF));
+            upper_address_bits = ((uint16_t)((data[0] & 0x00FF) << 8))\
+                                 + ((uint16_t)(data[1] & 0x00FF));
         }
 
         /* Type 0x05: Start Linear Address Record. */
@@ -170,10 +160,10 @@ void ihex_reader::read(ihex_reader::record_handle_type record_handler)
              * to jump to an execution address start point, now contained within
              * the data field.  Parse these address bits out, and then push the
              * instruction. */
-            upper_address_bits = ((boost::uint16_t)((data[0] & 0x00FF) << 8))\
-                                 + ((boost::uint16_t)(data[1] & 0x00FF));
-            lower_address_bits = ((boost::uint16_t)((data[2] & 0x00FF) << 8))\
-                                 + ((boost::uint16_t)(data[3] & 0x00FF));
+            upper_address_bits = ((uint16_t)((data[0] & 0x00FF) << 8))\
+                                 + ((uint16_t)(data[1] & 0x00FF));
+            lower_address_bits = ((uint16_t)((data[2] & 0x00FF) << 8))\
+                                 + ((uint16_t)(data[3] & 0x00FF));
 
             record_handler(lower_address_bits, upper_address_bits, 0, 0);
         }
@@ -192,7 +182,7 @@ void ihex_reader::read(ihex_reader::record_handle_type record_handler)
 int _file_writer_callback(
     boost::shared_ptr<std::ofstream> output_file,
     unsigned char *buff,
-    boost::uint16_t len
+    uint16_t len
 ) {
     output_file->write((const char *) buff, len);
     return 0;
@@ -213,9 +203,9 @@ void ihex_reader::to_bin_file(const std::string &bin_filename)
 
 // We need a functor for the cast, a lambda would be perfect...
 int _vector_writer_callback(
-    std::vector<boost::uint8_t>& vector,
+    std::vector<uint8_t>& vector,
     unsigned char *buff,
-    boost::uint16_t len
+    uint16_t len
 ) {
     for (size_t i = 0; i < len; i++) {
         vector.push_back(buff[i]);
@@ -224,9 +214,9 @@ int _vector_writer_callback(
 }
 
 #define DEFAULT_SIZE_ESTIMATE 8000000
-std::vector<boost::uint8_t> ihex_reader::to_vector(const size_t size_estimate)
+std::vector<uint8_t> ihex_reader::to_vector(const size_t size_estimate)
 {
-    std::vector<boost::uint8_t> buf;
+    std::vector<uint8_t> buf;
     buf.reserve(size_estimate == 0 ? DEFAULT_SIZE_ESTIMATE : size_estimate);
 
     this->read(boost::bind(&_vector_writer_callback, boost::ref(buf), _3, _4));

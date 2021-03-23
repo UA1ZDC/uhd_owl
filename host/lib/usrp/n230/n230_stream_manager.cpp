@@ -1,30 +1,19 @@
 //
 // Copyright 2013 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include "n230_stream_manager.hpp"
 
 #include "../../transport/super_recv_packet_handler.hpp"
 #include "../../transport/super_send_packet_handler.hpp"
-#include "async_packet_handler.hpp"
+#include <uhdlib/usrp/common/async_packet_handler.hpp>
 #include <uhd/transport/bounded_buffer.hpp>
-#include <boost/bind.hpp>
 #include <uhd/utils/tasks.hpp>
 #include <uhd/utils/log.hpp>
-#include <boost/foreach.hpp>
+#include <boost/bind.hpp>
 #include <boost/make_shared.hpp>
 
 static const double N230_RX_SW_BUFF_FULL_FACTOR   = 0.90;     //Buffer should ideally be 90% full.
@@ -33,7 +22,7 @@ static const size_t N230_TX_MAX_ASYNC_MESSAGES    = 1000;
 static const size_t N230_TX_MAX_SPP               = 4092;
 static const size_t N230_TX_FC_RESPONSE_FREQ      = 10;       //per flow-control window
 
-static const boost::uint32_t N230_EVENT_CODE_FLOW_CTRL = 0;
+static const uint32_t N230_EVENT_CODE_FLOW_CTRL = 0;
 
 namespace uhd { namespace usrp { namespace n230 {
 
@@ -81,13 +70,13 @@ rx_streamer::sptr n230_stream_manager::get_rx_stream(const uhd::stream_args_t &a
         //TODO: Propagate the device_args class into streamer in the future
         device_addr_t device_addr = args.args;
         if (not device_addr.has_key("recv_buff_size")) {
-            device_addr["recv_buff_size"] = boost::lexical_cast<std::string>(_dev_args.get_recv_buff_size());
+            device_addr["recv_buff_size"] = std::to_string(_dev_args.get_recv_buff_size());
         }
         if (not device_addr.has_key("recv_frame_size")) {
-            device_addr["recv_frame_size"] = boost::lexical_cast<std::string>(_dev_args.get_recv_frame_size());
+            device_addr["recv_frame_size"] = std::to_string(_dev_args.get_recv_frame_size());
         }
         if (not device_addr.has_key("num_recv_frames")) {
-            device_addr["num_recv_frames"] = boost::lexical_cast<std::string>(_dev_args.get_num_recv_frames());
+            device_addr["num_recv_frames"] = std::to_string(_dev_args.get_num_recv_frames());
         }
 
         transport::udp_zero_copy::buff_params buff_params_out;
@@ -97,7 +86,7 @@ rx_streamer::sptr n230_stream_manager::get_rx_stream(const uhd::stream_args_t &a
 
         //calculate packet size
         static const size_t hdr_size = 0
-            + vrt::max_if_hdr_words32*sizeof(boost::uint32_t)
+            + vrt::max_if_hdr_words32*sizeof(uint32_t)
             //+ sizeof(vrt::if_packet_info_t().tlr) //no longer using trailer
             - sizeof(vrt::if_packet_info_t().cid) //no class id ever used
             - sizeof(vrt::if_packet_info_t().tsi) //no int time ever used
@@ -171,7 +160,7 @@ rx_streamer::sptr n230_stream_manager::get_rx_stream(const uhd::stream_args_t &a
         if (prop_tree) {
             //TODO: Update this to support multiple motherboards
             const fs_path mb_path = "/mboards/0";
-            prop_tree->access<double>(mb_path / "rx_dsps" / boost::lexical_cast<std::string>(chan) / "rate" / "value").update();
+            prop_tree->access<double>(mb_path / "rx_dsps" / std::to_string(chan) / "rate" / "value").update();
         }
     }
     update_stream_states();
@@ -208,13 +197,13 @@ tx_streamer::sptr n230_stream_manager::get_tx_stream(const uhd::stream_args_t &a
         //TODO: Propagate the device_args class into streamer in the future
         device_addr_t device_addr = args.args;
         if (not device_addr.has_key("send_buff_size")) {
-            device_addr["send_buff_size"] = boost::lexical_cast<std::string>(_dev_args.get_send_buff_size());
+            device_addr["send_buff_size"] = std::to_string(_dev_args.get_send_buff_size());
         }
         if (not device_addr.has_key("send_frame_size")) {
-            device_addr["send_frame_size"] = boost::lexical_cast<std::string>(_dev_args.get_send_frame_size());
+            device_addr["send_frame_size"] = std::to_string(_dev_args.get_send_frame_size());
         }
         if (not device_addr.has_key("num_send_frames")) {
-            device_addr["num_send_frames"] = boost::lexical_cast<std::string>(_dev_args.get_num_send_frames());
+            device_addr["num_send_frames"] = std::to_string(_dev_args.get_num_send_frames());
         }
 
         transport::udp_zero_copy::buff_params buff_params_out;
@@ -224,8 +213,8 @@ tx_streamer::sptr n230_stream_manager::get_tx_stream(const uhd::stream_args_t &a
 
         //calculate packet size
         static const size_t hdr_size = 0
-            + vrt::num_vrl_words32*sizeof(boost::uint32_t)
-            + vrt::max_if_hdr_words32*sizeof(boost::uint32_t)
+            + vrt::num_vrl_words32*sizeof(uint32_t)
+            + vrt::max_if_hdr_words32*sizeof(uint32_t)
             //+ sizeof(vrt::if_packet_info_t().tlr) //forced to have trailer
             - sizeof(vrt::if_packet_info_t().cid) //no class id ever used
             - sizeof(vrt::if_packet_info_t().tsi) //no int time ever used
@@ -296,7 +285,7 @@ tx_streamer::sptr n230_stream_manager::get_tx_stream(const uhd::stream_args_t &a
         if (prop_tree) {
             //TODO: Update this to support multiple motherboards
             const fs_path mb_path = "/mboards/0";
-            prop_tree->access<double>(mb_path / "tx_dsps" / boost::lexical_cast<std::string>(chan) / "rate" / "value").update();
+            prop_tree->access<double>(mb_path / "tx_dsps" / std::to_string(chan) / "rate" / "value").update();
         }
     }
     update_stream_states();
@@ -424,7 +413,7 @@ void n230_stream_manager::_handle_rx_flowctrl(
     if (not buff) {
         throw uhd::runtime_error("handle_rx_flowctrl timed out getting a send buffer");
     }
-    boost::uint32_t *pkt = buff->cast<boost::uint32_t *>();
+    uint32_t *pkt = buff->cast<uint32_t *>();
 
     //recover seq32
     size_t& seq_sw = fc_cache->last_seq_in;
@@ -437,7 +426,7 @@ void n230_stream_manager::_handle_rx_flowctrl(
     vrt::if_packet_info_t packet_info;
     packet_info.packet_type = vrt::if_packet_info_t::PACKET_TYPE_CONTEXT;
     packet_info.num_payload_words32 = RXFC_PACKET_LEN_IN_WORDS;
-    packet_info.num_payload_bytes = packet_info.num_payload_words32*sizeof(boost::uint32_t);
+    packet_info.num_payload_bytes = packet_info.num_payload_words32*sizeof(uint32_t);
     packet_info.packet_count = seq_sw;
     packet_info.sob = false;
     packet_info.eob = false;
@@ -452,11 +441,11 @@ void n230_stream_manager::_handle_rx_flowctrl(
     _cvita_hdr_pack(pkt, packet_info);
 
     //load payload
-    pkt[packet_info.num_header_words32 + RXFC_CMD_CODE_OFFSET] = uhd::htonx<boost::uint32_t>(N230_EVENT_CODE_FLOW_CTRL);
-    pkt[packet_info.num_header_words32 + RXFC_SEQ_NUM_OFFSET] = uhd::htonx<boost::uint32_t>(seq_sw);
+    pkt[packet_info.num_header_words32 + RXFC_CMD_CODE_OFFSET] = uhd::htonx<uint32_t>(N230_EVENT_CODE_FLOW_CTRL);
+    pkt[packet_info.num_header_words32 + RXFC_SEQ_NUM_OFFSET] = uhd::htonx<uint32_t>(seq_sw);
 
     //send the buffer over the interface
-    buff->commit(sizeof(boost::uint32_t)*(packet_info.num_packet_words32));
+    buff->commit(sizeof(uint32_t)*(packet_info.num_packet_words32));
 }
 
 void n230_stream_manager::_handle_tx_async_msgs(
@@ -469,8 +458,8 @@ void n230_stream_manager::_handle_tx_async_msgs(
 
     //extract packet info
     vrt::if_packet_info_t if_packet_info;
-    if_packet_info.num_packet_words32 = buff->size()/sizeof(boost::uint32_t);
-    const boost::uint32_t *packet_buff = buff->cast<const boost::uint32_t *>();
+    if_packet_info.num_packet_words32 = buff->size()/sizeof(uint32_t);
+    const uint32_t *packet_buff = buff->cast<const uint32_t *>();
 
     //unpacking can fail
     uint32_t (*endian_conv)(uint32_t) = uhd::ntohx;
@@ -478,7 +467,7 @@ void n230_stream_manager::_handle_tx_async_msgs(
         _cvita_hdr_unpack(packet_buff, if_packet_info);
         endian_conv = uhd::ntohx;
     } catch(const std::exception &ex) {
-        UHD_MSG(error) << "Error parsing async message packet: " << ex.what() << std::endl;
+        UHD_LOGGER_ERROR("N230") << "Error parsing async message packet: " << ex.what() ;
         return;
     }
 
@@ -544,7 +533,7 @@ double n230_stream_manager::_get_tick_rate()
 }
 
 void n230_stream_manager::_cvita_hdr_unpack(
-    const boost::uint32_t *packet_buff,
+    const uint32_t *packet_buff,
     vrt::if_packet_info_t &if_packet_info)
 {
     if_packet_info.link_type = vrt::if_packet_info_t::LINK_TYPE_CHDR;
@@ -552,7 +541,7 @@ void n230_stream_manager::_cvita_hdr_unpack(
 }
 
 void n230_stream_manager::_cvita_hdr_pack(
-    boost::uint32_t *packet_buff,
+    uint32_t *packet_buff,
     vrt::if_packet_info_t &if_packet_info)
 {
     if_packet_info.link_type = vrt::if_packet_info_t::LINK_TYPE_CHDR;

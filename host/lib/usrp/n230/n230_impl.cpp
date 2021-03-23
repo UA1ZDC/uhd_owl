@@ -1,52 +1,43 @@
 //
 // Copyright 2014 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include "n230_impl.hpp"
+#include "n230_fw_ctrl_iface.hpp"
+#include "n230_defaults.h"
+#include "n230_fpga_defs.h"
+#include "n230_fw_defs.h"
+#include "n230_fw_host_iface.h"
 
-#include "usrp3_fw_ctrl_iface.hpp"
-#include "validate_subdev_spec.hpp"
+#include <uhdlib/usrp/common/validate_subdev_spec.hpp>
+
 #include <uhd/utils/static.hpp>
 #include <uhd/transport/if_addrs.hpp>
 #include <uhd/transport/udp_zero_copy.hpp>
 #include <uhd/usrp/subdev_spec.hpp>
 #include <uhd/utils/byteswap.hpp>
 #include <uhd/utils/log.hpp>
-#include <uhd/utils/msg.hpp>
+
 #include <uhd/types/sensors.hpp>
 #include <uhd/types/ranges.hpp>
 #include <uhd/types/direction.hpp>
 #include <uhd/usrp/mboard_eeprom.hpp>
 #include <uhd/usrp/dboard_eeprom.hpp>
 #include <uhd/usrp/gps_ctrl.hpp>
+
 #include <boost/format.hpp>
-#include <boost/foreach.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/bind.hpp>
 #include <boost/algorithm/string.hpp>
-#include <boost/assign/list_of.hpp>
 #include <boost/asio/ip/address_v4.hpp>
 #include <boost/asio.hpp> //used for htonl and ntohl
 #include <boost/make_shared.hpp>
 
-#include "../common/fw_comm_protocol.h"
-#include "n230_defaults.h"
-#include "n230_fpga_defs.h"
-#include "n230_fw_defs.h"
-#include "n230_fw_host_iface.h"
+#include <chrono>
+#include <thread>
 
 namespace uhd { namespace usrp { namespace n230 {
 
@@ -71,7 +62,7 @@ uhd::device_addrs_t n230_impl::n230_find(const uhd::device_addr_t &multi_dev_hin
     if (hints.size() > 1){
         device_addrs_t found_devices;
         std::string error_msg;
-        BOOST_FOREACH(const device_addr_t &hint_i, hints){
+        for(const device_addr_t &hint_i:  hints){
             device_addrs_t found_devices_i = n230_find(hint_i);
             if (found_devices_i.size() != 1) error_msg += str(boost::format(
                 "Could not resolve device hint \"%s\" to a single device."
@@ -98,7 +89,7 @@ uhd::device_addrs_t n230_impl::n230_find(const uhd::device_addr_t &multi_dev_hin
 
     //if no address was specified, send a broadcast on each interface
     if (not hint.has_key("addr")) {
-        BOOST_FOREACH(const if_addrs_t &if_addrs, get_if_addrs()) {
+        for(const if_addrs_t &if_addrs:  get_if_addrs()) {
             //avoid the loopback device
             if (if_addrs.inet == asio::ip::address_v4::loopback().to_string()) continue;
 
@@ -116,10 +107,10 @@ uhd::device_addrs_t n230_impl::n230_find(const uhd::device_addr_t &multi_dev_hin
     }
 
     std::vector<std::string> discovered_addrs =
-        usrp3::usrp3_fw_ctrl_iface::discover_devices(
+        n230_fw_ctrl_iface::discover_devices(
             hint["addr"], BOOST_STRINGIZE(N230_FW_COMMS_UDP_PORT), N230_FW_PRODUCT_ID);
 
-    BOOST_FOREACH(const std::string& addr, discovered_addrs)
+    for(const std::string& addr:  discovered_addrs)
     {
         device_addr_t new_addr;
         new_addr["type"] = "n230";
@@ -136,13 +127,13 @@ uhd::device_addrs_t n230_impl::n230_find(const uhd::device_addr_t &multi_dev_hin
         //connected communication can fail. Retry the following call to allow
         //the stack to update
         size_t first_conn_retries = 10;
-        usrp3::usrp3_fw_ctrl_iface::sptr fw_ctrl;
+        n230_fw_ctrl_iface::sptr fw_ctrl;
         while (first_conn_retries > 0) {
             try {
-                fw_ctrl = usrp3::usrp3_fw_ctrl_iface::make(ctrl_xport, N230_FW_PRODUCT_ID, false /*verbose*/);
+                fw_ctrl = n230_fw_ctrl_iface::make(ctrl_xport, N230_FW_PRODUCT_ID, false /*verbose*/);
                 break;
             } catch (uhd::io_error& ex) {
-                boost::this_thread::sleep(boost::posix_time::milliseconds(500));
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
                 first_conn_retries--;
             }
         }
@@ -192,7 +183,7 @@ device::sptr n230_impl::n230_make(const device_addr_t &device_addr)
  **********************************************************************/
 n230_impl::n230_impl(const uhd::device_addr_t& dev_addr)
 {
-    UHD_MSG(status) << "N230 initialization sequence..." << std::endl;
+    UHD_LOGGER_INFO("N230") << "N230 initialization sequence...";
     _dev_args.parse(dev_addr);
     _tree = uhd::property_tree::make();
 
@@ -201,8 +192,8 @@ n230_impl::n230_impl(const uhd::device_addr_t& dev_addr)
 
     //Initialize addresses
     std::vector<std::string> ip_addrs(1, dev_addr["addr"]);
-    if (dev_addr.has_key("secondary-addr")) {
-        ip_addrs.push_back(dev_addr["secondary-addr"]);
+    if (dev_addr.has_key("second_addr")) {
+        ip_addrs.push_back(dev_addr["second_addr"]);
     }
 
     //Read EEPROM and perform version checks before talking to HW
@@ -210,12 +201,12 @@ n230_impl::n230_impl(const uhd::device_addr_t& dev_addr)
     const mboard_eeprom_t& mb_eeprom = _eeprom_mgr->get_mb_eeprom();
     bool recover_mb_eeprom = dev_addr.has_key("recover_mb_eeprom");
     if (recover_mb_eeprom) {
-        UHD_MSG(warning) << "UHD is operating in EEPROM Recovery Mode which disables hardware version "
+        UHD_LOGGER_WARNING("N230") << "UHD is operating in EEPROM Recovery Mode which disables hardware version "
                             "checks.\nOperating in this mode may cause hardware damage and unstable "
-                            "radio performance!"<< std::endl;
+                            "radio performance!";
     }
-    boost::uint16_t hw_rev = boost::lexical_cast<boost::uint16_t>(mb_eeprom["revision"]);
-    boost::uint16_t hw_rev_compat = boost::lexical_cast<boost::uint16_t>(mb_eeprom["revision_compat"]);
+    uint16_t hw_rev = boost::lexical_cast<uint16_t>(mb_eeprom["revision"]);
+    uint16_t hw_rev_compat = boost::lexical_cast<uint16_t>(mb_eeprom["revision_compat"]);
     if (not recover_mb_eeprom) {
         if (hw_rev_compat > N230_HW_REVISION_COMPAT) {
             throw uhd::runtime_error(str(boost::format(
@@ -234,11 +225,11 @@ n230_impl::n230_impl(const uhd::device_addr_t& dev_addr)
     //Debug loopback mode
     switch(_dev_args.get_loopback_mode()) {
     case n230_device_args_t::LOOPBACK_RADIO:
-        UHD_MSG(status) << "DEBUG: Running in TX->RX Radio loopback mode.\n";
+        UHD_LOGGER_INFO("N230") << "DEBUG: Running in TX->RX Radio loopback mode.";
         _resource_mgr->get_frontend_ctrl().set_self_test_mode(LOOPBACK_RADIO);
         break;
     case n230_device_args_t::LOOPBACK_CODEC:
-        UHD_MSG(status) << "DEBUG: Running in TX->RX CODEC loopback mode.\n";
+        UHD_LOGGER_INFO("N230") << "DEBUG: Running in TX->RX CODEC loopback mode.";
         _resource_mgr->get_frontend_ctrl().set_self_test_mode(LOOPBACK_CODEC);
         break;
     default:
@@ -350,7 +341,7 @@ void n230_impl::_initialize_property_tree(const fs_path& mb_path)
         .add_coerced_subscriber(boost::bind(&n230_impl::_check_time_source, this, _1))
         .add_coerced_subscriber(boost::bind(&n230_clk_pps_ctrl::set_pps_source, _resource_mgr->get_clk_pps_ctrl_sptr(), _1))
         .set(n230::DEFAULT_TIME_SRC);
-    static const std::vector<std::string> time_sources = boost::assign::list_of("none")("external")("gpsdo");
+    const std::vector<std::string> time_sources{"none", "external", "gpsdo"};
     _tree->create<std::vector<std::string> >(mb_path / "time_source" / "options")
         .set(time_sources);
 
@@ -359,7 +350,7 @@ void n230_impl::_initialize_property_tree(const fs_path& mb_path)
         .add_coerced_subscriber(boost::bind(&n230_impl::_check_clock_source, this, _1))
         .add_coerced_subscriber(boost::bind(&n230_clk_pps_ctrl::set_clock_source, _resource_mgr->get_clk_pps_ctrl_sptr(), _1))
         .set(n230::DEFAULT_CLOCK_SRC);
-    static const std::vector<std::string> clock_sources = boost::assign::list_of("internal")("external")("gpsdo");
+    const std::vector<std::string> clock_sources{"internal", "external", "gpsdo"};
     _tree->create<std::vector<std::string> >(mb_path / "clock_source" / "options")
         .set(clock_sources);
     _tree->create<sensor_value_t>(mb_path / "sensors" / "ref_locked")
@@ -397,11 +388,11 @@ void n230_impl::_initialize_property_tree(const fs_path& mb_path)
     // Initialize subdev specs
     //------------------------------------------------------------------
     subdev_spec_t rx_spec, tx_spec;
-    BOOST_FOREACH(const std::string &fe, _tree->list(mb_path / "dboards" / "A" / "rx_frontends"))
+    for(const std::string &fe:  _tree->list(mb_path / "dboards" / "A" / "rx_frontends"))
     {
         rx_spec.push_back(subdev_spec_pair_t("A", fe));
     }
-    BOOST_FOREACH(const std::string &fe, _tree->list(mb_path / "dboards" / "A" / "tx_frontends"))
+    for(const std::string &fe:  _tree->list(mb_path / "dboards" / "A" / "tx_frontends"))
     {
         tx_spec.push_back(subdev_spec_pair_t("A", fe));
     }
@@ -411,33 +402,67 @@ void n230_impl::_initialize_property_tree(const fs_path& mb_path)
     //------------------------------------------------------------------
     // MiniSAS GPIO
     //------------------------------------------------------------------
-    _tree->create<boost::uint32_t>(mb_path / "gpio" / "FP0" / "DDR")
-        .set(0)
-        .add_coerced_subscriber(boost::bind(&gpio_atr::gpio_atr_3000::set_gpio_attr,
-            _resource_mgr->get_minisas_gpio_ctrl_sptr(0), gpio_atr::GPIO_DDR, _1));
-    _tree->create<boost::uint32_t>(mb_path / "gpio" / "FP1" / "DDR")
-        .set(0)
-        .add_coerced_subscriber(boost::bind(&gpio_atr::gpio_atr_3000::set_gpio_attr,
-            _resource_mgr->get_minisas_gpio_ctrl_sptr(1), gpio_atr::GPIO_DDR, _1));
-    _tree->create<boost::uint32_t>(mb_path / "gpio" / "FP0" / "OUT")
-        .set(0)
-        .add_coerced_subscriber(boost::bind(&gpio_atr::gpio_atr_3000::set_gpio_attr,
-            _resource_mgr->get_minisas_gpio_ctrl_sptr(0), gpio_atr::GPIO_OUT, _1));
-    _tree->create<boost::uint32_t>(mb_path / "gpio" / "FP1" / "OUT")
-        .set(0)
-        .add_coerced_subscriber(boost::bind(&gpio_atr::gpio_atr_3000::set_gpio_attr,
-            _resource_mgr->get_minisas_gpio_ctrl_sptr(1), gpio_atr::GPIO_OUT, _1));
-    _tree->create<boost::uint32_t>(mb_path / "gpio" / "FP0" / "READBACK")
-        .set_publisher(boost::bind(&gpio_atr::gpio_atr_3000::read_gpio, _resource_mgr->get_minisas_gpio_ctrl_sptr(0)));
-    _tree->create<boost::uint32_t>(mb_path / "gpio" / "FP1" / "READBACK")
-        .set_publisher(boost::bind(&gpio_atr::gpio_atr_3000::read_gpio, _resource_mgr->get_minisas_gpio_ctrl_sptr(1)));
-
+    for(const usrp::gpio_atr::gpio_attr_map_t::value_type attr:  usrp::gpio_atr::gpio_attr_map) {
+    switch (attr.first){
+                case usrp::gpio_atr::GPIO_SRC:
+                case usrp::gpio_atr::GPIO_CTRL:
+                    _tree->create<std::vector<std::string>>(mb_path / "gpio" / "FP0" /  attr.second)
+                         .set(std::vector<std::string>(32, usrp::gpio_atr::default_attr_value_map.at(attr.first)));
+                    _tree->create<std::vector<std::string>>(mb_path / "gpio" / "FP1" /  attr.second)
+                         .set(std::vector<std::string>(32, usrp::gpio_atr::default_attr_value_map.at(attr.first)));
+                    break;
+                case usrp::gpio_atr::GPIO_DDR:
+                    _tree->create<std::vector<std::string>>(mb_path / "gpio" / "FP0" /  attr.second)
+                         .set(std::vector<std::string>(32, usrp::gpio_atr::default_attr_value_map.at(attr.first)))
+                         .add_coerced_subscriber([this, attr](const std::vector<std::string> str_val){
+                            uint32_t val = 0;
+                            for(size_t i = 0 ; i < str_val.size() ; i++){
+                                val += usrp::gpio_atr::gpio_attr_value_pair.at(attr.second).at(str_val[i])<<i;
+                            }
+                            _resource_mgr->get_minisas_gpio_ctrl_sptr(0)->set_gpio_attr(attr.first, val);
+                         });
+                    _tree->create<std::vector<std::string>>(mb_path / "gpio" / "FP1" /  attr.second)
+                         .set(std::vector<std::string>(32, usrp::gpio_atr::default_attr_value_map.at(attr.first)))
+                         .add_coerced_subscriber([this, attr](const std::vector<std::string> str_val){
+                            uint32_t val = 0;
+                            for(size_t i = 0 ; i < str_val.size() ; i++){
+                                val += usrp::gpio_atr::gpio_attr_value_pair.at(attr.second).at(str_val[i])<<i;
+                            }
+                            _resource_mgr->get_minisas_gpio_ctrl_sptr(1)->set_gpio_attr(attr.first, val);
+                         });
+                    break;
+                case usrp::gpio_atr::GPIO_OUT:
+                    _tree->create<uint32_t>(mb_path / "gpio" / "FP0" /  attr.second)
+                         .set(0)
+                         .add_coerced_subscriber([this, attr](const uint32_t val){
+                             _resource_mgr->get_minisas_gpio_ctrl_sptr(0)->set_gpio_attr(attr.first, val);
+                         });
+                     _tree->create<uint32_t>(mb_path / "gpio" / "FP1" /  attr.second)
+                         .set(0)
+                         .add_coerced_subscriber([this, attr](const uint32_t val){
+                             _resource_mgr->get_minisas_gpio_ctrl_sptr(1)->set_gpio_attr(attr.first, val);
+                         });
+                         break;
+                case usrp::gpio_atr::GPIO_READBACK:
+                    _tree->create<uint32_t>(mb_path / "gpio" / "FP0" / "READBACK")
+                        .set_publisher(boost::bind(&gpio_atr::gpio_atr_3000::read_gpio, _resource_mgr->get_minisas_gpio_ctrl_sptr(0)));
+                    _tree->create<uint32_t>(mb_path / "gpio" / "FP1" / "READBACK")
+                        .set_publisher(boost::bind(&gpio_atr::gpio_atr_3000::read_gpio, _resource_mgr->get_minisas_gpio_ctrl_sptr(1)));
+                    break;
+                default:
+                    _tree->create<uint32_t>(mb_path / "gpio" / "FP0" /  attr.second)
+                         .set(0);
+                    _tree->create<uint32_t>(mb_path / "gpio" / "FP1" /  attr.second)
+                         .set(0);
+                    break;
+            }
+    }
     //------------------------------------------------------------------
     // GPSDO sensors
     //------------------------------------------------------------------
     if (_resource_mgr->is_gpsdo_present()) {
         uhd::gps_ctrl::sptr gps_ctrl = _resource_mgr->get_gps_ctrl();
-        BOOST_FOREACH(const std::string &name, gps_ctrl->get_sensors())
+        for(const std::string &name:  gps_ctrl->get_sensors())
         {
             _tree->create<sensor_value_t>(mb_path / "sensors" / name)
                 .set_publisher(boost::bind(&gps_ctrl::get_sensor, gps_ctrl, name));
@@ -498,8 +523,7 @@ void n230_impl::_initialize_radio_properties(const fs_path& mb_path, size_t inst
         .set_publisher(boost::bind(&tx_dsp_core_3000::get_freq_range, perif.duc));
 
     //RF Frontend Interfacing
-    static const std::vector<direction_t> data_directions = boost::assign::list_of(RX_DIRECTION)(TX_DIRECTION);
-    BOOST_FOREACH(direction_t direction, data_directions) {
+    for (direction_t direction : std::vector<direction_t>{RX_DIRECTION, TX_DIRECTION}) {
         const std::string dir_str = (direction == RX_DIRECTION) ? "rx" : "tx";
         const std::string key = boost::to_upper_copy(dir_str) + str(boost::format("%u") % (instance + 1));
         const fs_path rf_fe_path = mb_path / "dboards" / "A" / (dir_str + "_frontends") / ((instance==0)?"A":"B");
@@ -513,17 +537,15 @@ void n230_impl::_initialize_radio_properties(const fs_path& mb_path, size_t inst
 
         //Setup antenna stuff
         if (key[0] == 'R') {
-            static const std::vector<std::string> ants = boost::assign::list_of("TX/RX")("RX2");
             _tree->create<std::vector<std::string> >(rf_fe_path / "antenna" / "options")
-                .set(ants);
+                .set({"TX/RX", "RX2"});
             _tree->create<std::string>(rf_fe_path / "antenna" / "value")
                 .add_coerced_subscriber(boost::bind(&n230_frontend_ctrl::set_antenna_sel, _resource_mgr->get_frontend_ctrl_sptr(), instance, _1))
                 .set("RX2");
         }
         if (key[0] == 'T') {
-            static const std::vector<std::string> ants(1, "TX/RX");
             _tree->create<std::vector<std::string> >(rf_fe_path / "antenna" / "options")
-                .set(ants);
+                .set({"TX/RX"});
             _tree->create<std::string>(rf_fe_path / "antenna" / "value")
                 .set("TX/RX");
         }

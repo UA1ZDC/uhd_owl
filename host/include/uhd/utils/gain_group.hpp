@@ -1,18 +1,8 @@
 //
 // Copyright 2010-2011,2014 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #ifndef INCLUDED_UHD_UTILS_GAIN_GROUP_HPP
@@ -20,24 +10,26 @@
 
 #include <uhd/config.hpp>
 #include <uhd/types/ranges.hpp>
-#include <boost/shared_ptr.hpp>
 #include <boost/function.hpp>
+#include <boost/shared_ptr.hpp>
 #include <boost/utility.hpp>
-#include <vector>
 #include <string>
+#include <vector>
 
-namespace uhd{
+namespace uhd {
 
 /*!
  * A set of function to control a gain element.
  */
-struct UHD_API gain_fcns_t{
+struct UHD_API gain_fcns_t
+{
     boost::function<gain_range_t(void)> get_range;
-    boost::function<double(void)>        get_value;
-    boost::function<void(double)>        set_value;
+    boost::function<double(void)> get_value;
+    boost::function<void(double)> set_value;
 };
 
-class UHD_API gain_group : boost::noncopyable{
+class UHD_API gain_group : boost::noncopyable
+{
 public:
     typedef boost::shared_ptr<gain_group> sptr;
 
@@ -50,7 +42,7 @@ public:
      * \param name name of the gain element (optional)
      * \return a gain range with overall min, max, step
      */
-    virtual gain_range_t get_range(const std::string &name = "") = 0;
+    virtual gain_range_t get_range(const std::string& name = "") = 0;
 
     /*!
      * Get the gain value for the gain element specified by name.
@@ -58,7 +50,7 @@ public:
      * \param name name of the gain element (optional)
      * \return a gain value of the element or all elements
      */
-    virtual double get_value(const std::string &name = "") = 0;
+    virtual double get_value(const std::string& name = "") = 0;
 
     /*!
      * Set the gain value for the gain element specified by name.
@@ -68,7 +60,7 @@ public:
      * \param gain the gain to set for the element or across the group
      * \param name name of the gain element (optional)
      */
-    virtual void set_value(double gain, const std::string &name = "") = 0;
+    virtual void set_value(double gain, const std::string& name = "") = 0;
 
     /*!
      * Get a list of names of registered gain elements.
@@ -92,10 +84,7 @@ public:
      * \param priority the priority of the gain element
      */
     virtual void register_fcns(
-        const std::string &name,
-        const gain_fcns_t &gain_fcns,
-        size_t priority = 0
-    ) = 0;
+        const std::string& name, const gain_fcns_t& gain_fcns, size_t priority = 0) = 0;
 
     /*!
      * Make a new empty gain group.
@@ -104,7 +93,6 @@ public:
     static sptr make(void);
 };
 
-} //namespace uhd
+} // namespace uhd
 
 #endif /* INCLUDED_UHD_UTILS_GAIN_GROUP_HPP */
-

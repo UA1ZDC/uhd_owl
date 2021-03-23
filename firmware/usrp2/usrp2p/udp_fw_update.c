@@ -26,8 +26,7 @@
 #include <string.h>
 #include "ethernet.h"
 #include "udp_fw_update.h"
-//#include "xilinx_s3_icap.h"
-#include "xilinx_icape2.h"
+#include "xilinx_s3_icap.h"
 #include "i2c.h"
 
 uint16_t get_hw_rev(void) {
@@ -112,8 +111,7 @@ void handle_udp_fw_update_packet(struct socket_address src, struct socket_addres
     //should reset via icap_reload_fpga(uint32_t flash_address);
     update_data_out.id = USRP2_FW_UPDATE_ID_RESETTIN_TEH_COMPUTORZ_OMG;
     //you should note that if you get a reply packet to this the reset has obviously failed
-    //icap_reload_fpga(0);
-    warmboot(0);
+    icap_reload_fpga(0);
     break;
 
 //  case USRP2_FW_UPDATE_ID_KTHXBAI: //see ya

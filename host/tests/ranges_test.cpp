@@ -1,29 +1,21 @@
 //
 // Copyright 2010-2011 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-#include <boost/test/unit_test.hpp>
 #include <uhd/types/ranges.hpp>
+#include <boost/test/unit_test.hpp>
 #include <iostream>
 
 using namespace uhd;
 
-static const double tolerance = 0.001;
+static const double tolerance = 0.001; // %
 
-BOOST_AUTO_TEST_CASE(test_ranges_bounds){
+
+BOOST_AUTO_TEST_CASE(test_ranges_bounds)
+{
     meta_range_t mr;
     mr.push_back(range_t(-1.0, +1.0, 0.1));
     BOOST_CHECK_CLOSE(mr.start(), -1.0, tolerance);
@@ -42,7 +34,8 @@ BOOST_AUTO_TEST_CASE(test_ranges_bounds){
     BOOST_CHECK_CLOSE(mr[0].step(), 0.1, tolerance);
 }
 
-BOOST_AUTO_TEST_CASE(test_ranges_clip){
+BOOST_AUTO_TEST_CASE(test_ranges_clip)
+{
     meta_range_t mr;
     mr.push_back(range_t(-1.0, +1.0, 0.1));
     mr.push_back(range_t(40.0, 60.0, 1.0));
@@ -56,7 +49,26 @@ BOOST_AUTO_TEST_CASE(test_ranges_clip){
     BOOST_CHECK_CLOSE(mr.clip(50.9, true), 51.0, tolerance);
 }
 
-BOOST_AUTO_TEST_CASE(test_ranges_clip2){
+BOOST_AUTO_TEST_CASE(test_meta_range_t_ctor)
+{
+    meta_range_t mr1(0.0, 10.0, 1.0);
+    BOOST_CHECK_CLOSE(mr1.clip(5.0), 5.0, tolerance);
+    BOOST_CHECK_CLOSE(mr1.clip(11.0), 10.0, tolerance);
+    BOOST_CHECK_CLOSE(mr1.clip(5.1, true), 5.0, tolerance);
+
+    meta_range_t mr2(0.0, 10.0);
+    BOOST_CHECK_CLOSE(mr2.clip(5.0), 5.0, tolerance);
+    BOOST_CHECK_CLOSE(mr2.clip(11.0), 10.0, tolerance);
+    BOOST_CHECK_CLOSE(mr2.clip(5.1, true), 5.1, tolerance);
+
+    meta_range_t mr3(mr2.begin(), mr2.end());
+    BOOST_CHECK_CLOSE(mr3.clip(5.0), 5.0, tolerance);
+    BOOST_CHECK_CLOSE(mr3.clip(11.0), 10.0, tolerance);
+    BOOST_CHECK_CLOSE(mr3.clip(5.1, true), 5.1, tolerance);
+}
+
+BOOST_AUTO_TEST_CASE(test_ranges_clip2)
+{
     meta_range_t mr;
     mr.push_back(range_t(1.));
     mr.push_back(range_t(2.));
@@ -67,4 +79,14 @@ BOOST_AUTO_TEST_CASE(test_ranges_clip2){
     BOOST_CHECK_CLOSE(mr.clip(1.2, true), 1., tolerance);
     BOOST_CHECK_CLOSE(mr.clip(3.1, true), 3., tolerance);
     BOOST_CHECK_CLOSE(mr.clip(4., true), 3., tolerance);
+}
+
+BOOST_AUTO_TEST_CASE(test_ranges_compare)
+{
+    range_t range(1);
+    range_t n_range(1);
+    range_t d_range(2);
+
+    BOOST_CHECK(range == n_range);
+    BOOST_CHECK(range != d_range);
 }

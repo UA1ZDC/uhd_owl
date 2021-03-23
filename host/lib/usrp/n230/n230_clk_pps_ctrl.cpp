@@ -1,27 +1,16 @@
 //
 // Copyright 2013-2014 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include "n230_clk_pps_ctrl.hpp"
 
-#include <uhd/utils/msg.hpp>
+#include <uhd/utils/log.hpp>
 #include <uhd/utils/safe_call.hpp>
-#include <boost/cstdint.hpp>
+#include <stdint.h>
 #include <boost/format.hpp>
-#include <boost/foreach.hpp>
 #include <stdexcept>
 #include <cmath>
 #include <cstdlib>
@@ -56,11 +45,11 @@ public:
 
     double set_tick_rate(const double rate)
     {
-        UHD_MSG(status) << "Configuring a tick rate of " << rate/1e6 << " MHz... ";
+        UHD_LOGGER_INFO("N230") << "Configuring a tick rate of " << rate/1e6 << " MHz... ";
         _tick_rate = _codec_ctrl->set_clock_rate(rate);
-        UHD_MSG(status) << "got " << _tick_rate/1e6 << " MHz\n";
+        UHD_LOGGER_INFO("N230") << "got " << _tick_rate/1e6 << " MHz\n";
 
-        BOOST_FOREACH(time_core_3000::sptr& time_core, _time_cores) {
+        for(time_core_3000::sptr& time_core:  _time_cores) {
             time_core->set_tick_rate(_tick_rate);
             time_core->self_test();
         }

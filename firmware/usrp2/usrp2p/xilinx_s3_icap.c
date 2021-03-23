@@ -26,7 +26,7 @@
 
 #include <xilinx_s3_icap.h>
 #include <memory_map.h>
-//#include <spi_flash_private.h> //for READ_CMD
+#include <spi_flash_private.h> //for READ_CMD
 
 
 /* bit swap end-for-end */
@@ -71,12 +71,12 @@ icap_reload_fpga(uint32_t flash_address)
 
     //note! t.c[0] MUST contain the byte-wide read command for the flash device used.
     //for the 25P64, and most other flash devices, this is 0x03.
-    //t.c[0] = FAST_READ_CMD;
+    t.c[0] = FAST_READ_CMD;
 
     //TODO: look up the watchdog timer, ensure it won't fire too soon
 
-    ////UG332 p279
-    /*wr_icap(0xff);
+    //UG332 p279
+    wr_icap(0xff);
     wr_icap(0xff); //dummy word, probably unnecessary
     wr_icap(0xAA);
     wr_icap(0x99); //sync word
@@ -95,24 +95,5 @@ icap_reload_fpga(uint32_t flash_address)
     wr_icap(0x20);
     wr_icap(0x00); //Type 1 NOP
     wr_icap(0x20);
-    wr_icap(0x00);*/
-
-
-    //UG470 p142
-    wr_icap(0xff);wr_icap(0xff);
-    wr_icap(0xff);wr_icap(0xff); 	//Dummy Word
-    wr_icap(0xaa);wr_icap(0x99);
-    wr_icap(0x55);wr_icap(0x66);	//Sync Word
-    wr_icap(0x20);wr_icap(0x00);
-    wr_icap(0x00);wr_icap(0x00);	//Type 1 NO OP Word
-    wr_icap(0x30);wr_icap(0x02);
-    wr_icap(0x00);wr_icap(0x01);	//Type 1 Write 1 Words to WBSTAR
-    wr_icap(t.c[1]);wr_icap(t.c[2]);
-    wr_icap(t.c[3]);wr_icap(0xff);	//Warm Boot Start Address (Load the Desired Address)
-    wr_icap(0x30);wr_icap(0x00);
-    wr_icap(0x80);wr_icap(0x01);	//Type 1 Write 1 Words to CMD
-    wr_icap(0x00);wr_icap(0x00);
-    wr_icap(0x00);wr_icap(0x0f);	//IPROG Command
-    wr_icap(0x20);wr_icap(0x00);
-    wr_icap(0x00);wr_icap(0x00);	//Type 1 NO OP Word
+    wr_icap(0x00);
 }

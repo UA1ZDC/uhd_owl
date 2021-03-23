@@ -34,11 +34,11 @@ size_t spi_flash_log2_memory_size(void)
         uint32_t id = spi_flash_rdid();
         uint8_t type = (id >> 8) & 0xff;
         uint8_t size = (id >> 0) & 0xff;
-        if (type != 0xba) {printf("type = %x\n",type); abort();}
+        if (type != 0x20) abort();
         _spi_flash_log2_memory_size = size;
     }
     if (_spi_flash_log2_memory_size < 22 ||
-        _spi_flash_log2_memory_size > 24 ) {printf("size = %x\n",_spi_flash_log2_memory_size); abort();}
+        _spi_flash_log2_memory_size > 24 ) abort();
     return _spi_flash_log2_memory_size;
 }
 
@@ -47,9 +47,7 @@ size_t spi_flash_log2_sector_size(void)
     static unsigned char log2_sector_size[3] = {
         16, /* M25P32  */
         16, /* M25P64  */
-        //18, /* M25P128 */
-		16, /* N25Q128 */
-
+        18, /* M25P128 */
     };
     return log2_sector_size[spi_flash_log2_memory_size() - 22];
 }

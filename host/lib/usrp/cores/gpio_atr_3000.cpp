@@ -1,23 +1,13 @@
 //
 // Copyright 2011,2014 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-#include "gpio_atr_3000.hpp"
 #include <uhd/types/dict.hpp>
 #include <uhd/utils/soft_register.hpp>
+#include <uhdlib/usrp/cores/gpio_atr_3000.hpp>
 
 using namespace uhd;
 using namespace usrp;
@@ -58,7 +48,7 @@ public:
         _atr_disable_reg.initialize(*_iface, true);
     }
 
-    virtual void set_atr_mode(const gpio_atr_mode_t mode, const boost::uint32_t mask)
+    virtual void set_atr_mode(const gpio_atr_mode_t mode, const uint32_t mask)
     {
         //Each bit in the "ATR Disable" register determines whether the respective bit in the GPIO
         //output bus is driven by the ATR engine or a static register.
@@ -70,7 +60,7 @@ public:
         _atr_disable_reg.flush();
     }
 
-    virtual void set_gpio_ddr(const gpio_ddr_t dir, const boost::uint32_t mask)
+    virtual void set_gpio_ddr(const gpio_ddr_t dir, const uint32_t mask)
     {
         //Each bit in the "DDR" register determines whether the respective bit in the GPIO
         //bus is an input or an output.
@@ -82,7 +72,7 @@ public:
         _ddr_reg.flush();
     }
 
-    virtual void set_atr_reg(const gpio_atr_reg_t atr, const boost::uint32_t value, const boost::uint32_t mask = MASK_SET_ALL)
+    virtual void set_atr_reg(const gpio_atr_reg_t atr, const uint32_t value, const uint32_t mask = MASK_SET_ALL)
     {
         //Set the value of the specified ATR register. For bits with ATR Disable set to 1,
         //the IDLE register will hold the output state
@@ -102,7 +92,7 @@ public:
         reg->flush();
     }
 
-    virtual void set_gpio_out(const boost::uint32_t value, const boost::uint32_t mask = MASK_SET_ALL) {
+    virtual void set_gpio_out(const uint32_t value, const uint32_t mask = MASK_SET_ALL) {
         //Set the value of the specified GPIO output register.
         //This setting will only get applied to all bits in the "mask" that are 1. All other
         //bits will retain their old value.
@@ -113,7 +103,7 @@ public:
         _atr_idle_reg.flush();
     }
 
-    virtual boost::uint32_t read_gpio()
+    virtual uint32_t read_gpio()
     {
         //Read the state of the GPIO pins
         //If a pin is configured as an input, reads the actual value of the pin
@@ -125,12 +115,14 @@ public:
         }
     }
 
-    inline virtual void set_gpio_attr(const gpio_attr_t attr, const boost::uint32_t value)
+    inline virtual void set_gpio_attr(const gpio_attr_t attr, const uint32_t value)
     {
         //An attribute based API to configure all settings for the GPIO bus in one function
         //call. This API does not have a mask so it configures all bits at the same time.
         switch (attr)
         {
+        case GPIO_SRC:
+            throw uhd::runtime_error("Can't set GPIO source by GPIO ATR interface.");
         case GPIO_CTRL:
             set_atr_mode(MODE_ATR, value);   //Configure mode=ATR for all bits that are set
             set_atr_mode(MODE_GPIO, ~value); //Configure mode=GPIO for all bits that are unset
@@ -159,6 +151,9 @@ public:
             //Only set bits that are driven by the ATR engine
             set_atr_reg(ATR_REG_FULL_DUPLEX, value);
             break;
+        case GPIO_READBACK:
+            //This is readonly register, ignore on set. 
+            break;  
         default:
             UHD_THROW_INVALID_CODE_PATH();
         }
@@ -175,12 +170,12 @@ protected:
             uhd::soft_reg32_wo_t::set(REGISTER, 0);
         }
 
-        virtual void set_with_mask(const boost::uint32_t value, const boost::uint32_t mask) {
+        virtual void set_with_mask(const uint32_t value, const uint32_t mask) {
             uhd::soft_reg32_wo_t::set(REGISTER,
                 (value&mask)|(uhd::soft_reg32_wo_t::get(REGISTER)&(~mask)));
         }
 
-        virtual boost::uint32_t get() {
+        virtual uint32_t get() {
             return uhd::soft_reg32_wo_t::get(uhd::soft_reg32_wo_t::REGISTER);
         }
 
@@ -197,19 +192,19 @@ protected:
             _atr_disable_reg(atr_disable_reg)
         { }
 
-        virtual void set_with_mask(const boost::uint32_t value, const boost::uint32_t mask) {
+        virtual void set_with_mask(const uint32_t value, const uint32_t mask) {
             _atr_idle_cache = (value&mask)|(_atr_idle_cache&(~mask));
         }
 
-        virtual boost::uint32_t get() {
+        virtual uint32_t get() {
             return _atr_idle_cache;
         }
 
-        void set_gpio_out_with_mask(const boost::uint32_t value, const boost::uint32_t mask) {
+        void set_gpio_out_with_mask(const uint32_t value, const uint32_t mask) {
             _gpio_out_cache = (value&mask)|(_gpio_out_cache&(~mask));
         }
 
-        virtual boost::uint32_t get_gpio_out() {
+        virtual uint32_t get_gpio_out() {
             return _gpio_out_cache;
         }
 
@@ -222,8 +217,8 @@ protected:
         }
 
     private:
-        boost::uint32_t _atr_idle_cache;
-        boost::uint32_t _gpio_out_cache;
+        uint32_t _atr_idle_cache;
+        uint32_t _gpio_out_cache;
         masked_reg_t&   _atr_disable_reg;
     };
 
@@ -260,34 +255,36 @@ public:
     db_gpio_atr_3000_impl(wb_iface::sptr iface, const wb_iface::wb_addr_type base, const wb_iface::wb_addr_type rb_addr):
         gpio_atr_3000_impl(iface, base, rb_addr) { /* NOP */ }
 
-    inline void set_pin_ctrl(const db_unit_t unit, const boost::uint32_t value, const boost::uint32_t mask)
+    inline void set_pin_ctrl(const db_unit_t unit, const uint32_t value, const uint32_t mask)
     {
         gpio_atr_3000_impl::set_atr_mode(MODE_ATR,  compute_mask(unit, value&mask));
         gpio_atr_3000_impl::set_atr_mode(MODE_GPIO, compute_mask(unit, (~value)&mask));
     }
 
-    inline boost::uint32_t get_pin_ctrl(const db_unit_t unit)
+    inline uint32_t get_pin_ctrl(const db_unit_t unit)
     {
         return (~_atr_disable_reg.get()) >> compute_shift(unit);
     }
 
-    inline void set_gpio_ddr(const db_unit_t unit, const boost::uint32_t value, const boost::uint32_t mask)
+    using gpio_atr_3000_impl::set_gpio_ddr;
+    inline void set_gpio_ddr(const db_unit_t unit, const uint32_t value, const uint32_t mask)
     {
         gpio_atr_3000_impl::set_gpio_ddr(DDR_OUTPUT, compute_mask(unit, value&mask));
         gpio_atr_3000_impl::set_gpio_ddr(DDR_INPUT,  compute_mask(unit, (~value)&mask));
     }
 
-    inline boost::uint32_t get_gpio_ddr(const db_unit_t unit)
+    inline uint32_t get_gpio_ddr(const db_unit_t unit)
     {
         return _ddr_reg.get() >> compute_shift(unit);
     }
 
-    inline void set_atr_reg(const db_unit_t unit, const gpio_atr_reg_t atr, const boost::uint32_t value, const boost::uint32_t mask)
+    using gpio_atr_3000_impl::set_atr_reg;
+    inline void set_atr_reg(const db_unit_t unit, const gpio_atr_reg_t atr, const uint32_t value, const uint32_t mask)
     {
         gpio_atr_3000_impl::set_atr_reg(atr, value << compute_shift(unit), compute_mask(unit, mask));
     }
 
-    inline boost::uint32_t get_atr_reg(const db_unit_t unit, const gpio_atr_reg_t atr)
+    inline uint32_t get_atr_reg(const db_unit_t unit, const gpio_atr_reg_t atr)
     {
         masked_reg_t* reg = NULL;
         switch (atr) {
@@ -300,25 +297,27 @@ public:
         return (reg->get() & compute_mask(unit, MASK_SET_ALL)) >> compute_shift(unit);
     }
 
-    inline void set_gpio_out(const db_unit_t unit, const boost::uint32_t value, const boost::uint32_t mask)
+    using gpio_atr_3000_impl::set_gpio_out;
+    inline void set_gpio_out(const db_unit_t unit, const uint32_t value, const uint32_t mask)
     {
         gpio_atr_3000_impl::set_gpio_out(
-            static_cast<boost::uint32_t>(value) << compute_shift(unit),
+            static_cast<uint32_t>(value) << compute_shift(unit),
             compute_mask(unit, mask));
     }
 
-    inline boost::uint32_t get_gpio_out(const db_unit_t unit)
+    inline uint32_t get_gpio_out(const db_unit_t unit)
     {
         return (_atr_idle_reg.get_gpio_out() & compute_mask(unit, MASK_SET_ALL)) >> compute_shift(unit);
     }
 
-    inline boost::uint32_t read_gpio(const db_unit_t unit)
+    using gpio_atr_3000_impl::read_gpio;
+    inline uint32_t read_gpio(const db_unit_t unit)
     {
         return (gpio_atr_3000_impl::read_gpio() & compute_mask(unit, MASK_SET_ALL)) >> compute_shift(unit);
     }
 
 private:
-    inline boost::uint32_t compute_shift(const db_unit_t unit) {
+    inline uint32_t compute_shift(const db_unit_t unit) {
         switch (unit) {
         case dboard_iface::UNIT_RX: return 0;
         case dboard_iface::UNIT_TX: return 16;
@@ -326,8 +325,8 @@ private:
         }
     }
 
-    inline boost::uint32_t compute_mask(const db_unit_t unit, const boost::uint32_t mask) {
-        boost::uint32_t tmp_mask = (unit == dboard_iface::UNIT_BOTH) ? mask : (mask & 0xFFFF);
+    inline uint32_t compute_mask(const db_unit_t unit, const uint32_t mask) {
+        uint32_t tmp_mask = (unit == dboard_iface::UNIT_BOTH) ? mask : (mask & 0xFFFF);
         return tmp_mask << (compute_shift(unit));
     }
 };

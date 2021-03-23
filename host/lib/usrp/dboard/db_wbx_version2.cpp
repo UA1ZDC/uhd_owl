@@ -1,18 +1,8 @@
 //
 // Copyright 2011-2014 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include "db_wbx_common.hpp"
@@ -23,7 +13,7 @@
 #include <uhd/types/sensors.hpp>
 #include <uhd/utils/assert_has.hpp>
 #include <uhd/utils/algorithm.hpp>
-#include <uhd/utils/msg.hpp>
+
 #include <uhd/usrp/dboard_base.hpp>
 #include <boost/assign/list_of.hpp>
 #include <boost/format.hpp>
@@ -58,9 +48,9 @@ static double tx_pga0_gain_to_dac_volts(double &gain){
     //calculate the voltage for the aux dac
     double dac_volts = gain*slope + min_volts;
 
-    UHD_LOGV(often) << boost::format(
+    UHD_LOGGER_TRACE("WBX") << boost::format(
         "WBX TX Gain: %f dB, dac_volts: %f V"
-    ) % gain % dac_volts << std::endl;
+    ) % gain % dac_volts ;
 
     //the actual gain setting
     gain = (dac_volts - min_volts)/slope;
@@ -91,7 +81,7 @@ wbx_base::wbx_version2::wbx_version2(wbx_base *_self_wbx_base) {
     // Register TX properties
     ////////////////////////////////////////////////////////////////////
     this->get_tx_subtree()->create<std::string>("name").set("WBXv2 TX");
-    BOOST_FOREACH(const std::string &name, wbx_v2_tx_gain_ranges.keys()){
+    for(const std::string &name:  wbx_v2_tx_gain_ranges.keys()){
         self_base->get_tx_subtree()->create<double>("gains/"+name+"/value")
             .set_coercer(boost::bind(&wbx_base::wbx_version2::set_tx_gain, this, _1, name))
             .set(wbx_v2_tx_gain_ranges[name].start());
@@ -165,9 +155,9 @@ double wbx_base::wbx_version2::set_lo_freq(dboard_iface::unit_t unit, double tar
     //clip to tuning range
     target_freq = wbx_v2_freq_range.clip(target_freq);
 
-    UHD_LOGV(often) << boost::format(
+    UHD_LOGGER_TRACE("WBX") << boost::format(
         "WBX tune: target frequency %f MHz"
-    ) % (target_freq/1e6) << std::endl;
+    ) % (target_freq/1e6) ;
 
     /*
      * If the user sets 'mode_n=integer' in the tuning args, the user wishes to

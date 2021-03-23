@@ -1,25 +1,14 @@
 //
 // Copyright 2016 Ettus Research
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-#include "expert_container.hpp"
+#include <uhdlib/experts/expert_container.hpp>
 #include <uhd/exception.hpp>
-#include <uhd/utils/msg.hpp>
+#include <uhd/utils/log.hpp>
 #include <boost/format.hpp>
-#include <boost/foreach.hpp>
 #include <boost/function.hpp>
 #include <boost/bind.hpp>
 #include <boost/make_shared.hpp>
@@ -92,23 +81,28 @@ public:
         boost::lock_guard<boost::recursive_mutex> resolve_lock(_resolve_mutex);
         boost::lock_guard<boost::mutex> lock(_mutex);
         EX_LOG(0, str(boost::format("resolve_all(%s)") % (force?"force":"")));
+        // Do a full resolve of the graph
         _resolve_helper("", "", force);
     }
 
-    void resolve_from(const std::string& node_name)
+    void resolve_from(const std::string&)
     {
         boost::lock_guard<boost::recursive_mutex> resolve_lock(_resolve_mutex);
         boost::lock_guard<boost::mutex> lock(_mutex);
-        EX_LOG(0, str(boost::format("resolve_from(%s)") % node_name));
-        _resolve_helper(node_name, "", false);
+        EX_LOG(0, "resolve_from (overridden to resolve_all)");
+        // Do a full resolve of the graph
+        // Not optimizing the traversal using node_name to reduce experts complexity
+        _resolve_helper("", "", false);
     }
 
-    void resolve_to(const std::string& node_name)
+    void resolve_to(const std::string&)
     {
         boost::lock_guard<boost::recursive_mutex> resolve_lock(_resolve_mutex);
         boost::lock_guard<boost::mutex> lock(_mutex);
-        EX_LOG(0, str(boost::format("resolve_to(%s)") % node_name));
-        _resolve_helper("", node_name, false);
+        EX_LOG(0, "resolve_to (overridden to resolve_all)");
+        // Do a full resolve of the graph
+        // Not optimizing the traversal using node_name to reduce experts complexity
+        _resolve_helper("", "", false);
     }
 
     dag_vertex_t& retrieve(const std::string& name) const
@@ -146,11 +140,11 @@ public:
             const dag_vertex_t& vertex = _get_vertex(*vi.first);
             if (vertex.get_class() != CLASS_WORKER) {
                 dot_str += str(boost::format(" %d [label=\"%s\",shape=%s,xlabel=\"%s\"];\n") %
-                               boost::uint32_t(*vi.first) % vertex.get_name() %
+                               uint32_t(*vi.first) % vertex.get_name() %
                                DATA_SHAPE % vertex.get_dtype());
             } else {
                 dot_str += str(boost::format(" %d [label=\"%s\",shape=%s];\n") %
-                               boost::uint32_t(*vi.first) % vertex.get_name() % WORKER_SHAPE);
+                               uint32_t(*vi.first) % vertex.get_name() % WORKER_SHAPE);
             }
         }
 
@@ -160,8 +154,8 @@ public:
              ++ei.first
         ) {
             dot_str += str(boost::format(" %d -> %d;\n") %
-                           boost::uint32_t(boost::source(*(ei.first), _expert_dag)) %
-                           boost::uint32_t(boost::target(*(ei.first), _expert_dag)));
+                           uint32_t(boost::source(*(ei.first), _expert_dag)) %
+                           uint32_t(boost::target(*(ei.first), _expert_dag)));
         }
         dot_str += "}\n";
         return dot_str;
@@ -180,7 +174,7 @@ public:
             EX_LOG(1, "cycle check ... PASSED");
         } else {
             EX_LOG(1, "cycle check ... ERROR!!!");
-            BOOST_FOREACH(const std::string& e, back_edges) {
+            for(const std::string& e:  back_edges) {
                 EX_LOG(2, "back edge: " + e);
             }
         }
@@ -188,7 +182,7 @@ public:
 
         //Test 2: Check data node input and output edges
         std::vector<std::string> data_node_issues;
-        BOOST_FOREACH(const vertex_map_t::value_type& v, _datanode_map) {
+        for(const vertex_map_t::value_type& v:  _datanode_map) {
             size_t in_count = 0, out_count = 0;
             for (std::pair<edge_iter, edge_iter> ei = boost::edges(_expert_dag);
                  ei.first != ei.second;
@@ -233,7 +227,7 @@ public:
             EX_LOG(1, "data node check ... PASSED");
         } else {
             EX_LOG(1, "data node check ... WARNING!");
-            BOOST_FOREACH(const std::string& i, data_node_issues) {
+            for(const std::string& i:  data_node_issues) {
                 EX_LOG(2, i);
             }
         }
@@ -241,7 +235,7 @@ public:
 
         //Test 3: Check worker node input and output edges
         std::vector<std::string> worker_issues;
-        BOOST_FOREACH(const vertex_map_t::value_type& v, _worker_map) {
+        for(const vertex_map_t::value_type& v:  _worker_map) {
             size_t in_count = 0, out_count = 0;
             for (std::pair<edge_iter, edge_iter> ei = boost::edges(_expert_dag);
                  ei.first != ei.second;
@@ -263,7 +257,7 @@ public:
             EX_LOG(1, "worker check ... PASSED");
         } else {
             EX_LOG(1, "worker check ... WARNING!");
-            BOOST_FOREACH(const std::string& i, worker_issues) {
+            for(const std::string& i:  worker_issues) {
                 EX_LOG(2, i);
             }
         }
@@ -289,11 +283,11 @@ protected:
         EX_LOG(0, str(boost::format("add_data_node(%s)") % data_node->get_name()));
         if (data_node->get_class() == CLASS_WORKER) {
             throw uhd::runtime_error("Supplied node " + data_node->get_name() + " is not a data/property node.");
-            delete data_node;
+            // Throw leaves data_node undeleted
         }
         if (_datanode_map.find(data_node->get_name()) != _datanode_map.end()) {
             throw uhd::runtime_error("Data node with name " + data_node->get_name() + " already exists");
-            delete data_node;
+            // Throw leaves data node undeleted
         }
 
         try {
@@ -330,11 +324,9 @@ protected:
         EX_LOG(0, str(boost::format("add_worker(%s)") % worker->get_name()));
         if (worker->get_class() != CLASS_WORKER) {
             throw uhd::runtime_error("Supplied node " + worker->get_name() + " is not a worker node.");
-            delete worker;
         }
         if (_worker_map.find(worker->get_name()) != _worker_map.end()) {
             throw uhd::runtime_error("Resolver with name " + worker->get_name() + " already exists.");
-            delete worker;
         }
 
         try {
@@ -344,7 +336,7 @@ protected:
             _worker_map.insert(vertex_map_t::value_type(worker->get_name(), gr_node));
 
             //For each input, add an edge from the input to this node
-            BOOST_FOREACH(const std::string& node_name, worker->get_inputs()) {
+            for(const std::string& node_name:  worker->get_inputs()) {
                 vertex_map_t::const_iterator node = _datanode_map.find(node_name);
                 if (node != _datanode_map.end()) {
                     boost::add_edge((*node).second, gr_node, _expert_dag);
@@ -355,7 +347,7 @@ protected:
             }
 
             //For each output, add an edge from this node to the output
-            BOOST_FOREACH(const std::string& node_name, worker->get_outputs()) {
+            for(const std::string& node_name:  worker->get_outputs()) {
                 vertex_map_t::const_iterator node = _datanode_map.find(node_name);
                 if (node != _datanode_map.end()) {
                     boost::add_edge(gr_node, (*node).second, _expert_dag);
@@ -420,7 +412,7 @@ private:
             boost::depth_first_search(_expert_dag, boost::visitor(cdet_vis));
             if (not back_edges.empty()) {
                 std::string edges;
-                BOOST_FOREACH(const std::string& e, back_edges) {
+                for(const std::string& e:  back_edges) {
                     edges += "* " + e + "";
                 }
                 throw uhd::runtime_error("Cannot resolve expert because it has at least one cycle!\n"
@@ -511,7 +503,7 @@ private:
     {
         std::string indents;
         for (size_t i = 0; i < depth; i++) indents += "- ";
-        UHD_MSG(fastpath) << "[expert::" + _name + "] " << indents << str << std::endl;
+        UHD_LOG_DEBUG("EXPERT","[expert::" + _name + "] " << indents << str)
     }
 
 private:

@@ -1,39 +1,30 @@
 //
 // Copyright 2010-2013,2015-2016 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #ifndef INCLUDED_UHD_USRP_DBOARD_IFACE_HPP
 #define INCLUDED_UHD_USRP_DBOARD_IFACE_HPP
 
 #include <uhd/config.hpp>
-#include <uhd/utils/pimpl.hpp>
 #include <uhd/types/serial.hpp>
 #include <uhd/types/time_spec.hpp>
 #include <uhd/usrp/fe_connection.hpp>
 #include <uhd/usrp/gpio_defs.hpp>
+#include <uhd/utils/pimpl.hpp>
+#include <stdint.h>
 #include <boost/shared_ptr.hpp>
-#include <boost/cstdint.hpp>
 #include <boost/thread/thread.hpp>
 #include <string>
 #include <vector>
 
-namespace uhd{ namespace usrp{
+namespace uhd { namespace usrp {
 
 //! Special properties that differentiate this daughterboard slot
-struct UHD_API dboard_iface_special_props_t{
+struct UHD_API dboard_iface_special_props_t
+{
     /*!
      * Soft clock divider:
      * When a motherboard cannot provided a divided dboard clock,
@@ -59,20 +50,21 @@ struct UHD_API dboard_iface_special_props_t{
  * This interface provides i2c, spi, gpio, atr, aux dac/adc access.
  * Each mboard should have a specially tailored iface for its dboard.
  */
-class UHD_API dboard_iface : public uhd::i2c_iface{
+class UHD_API dboard_iface : public uhd::i2c_iface
+{
 public:
     typedef boost::shared_ptr<dboard_iface> sptr;
     typedef dboard_iface_special_props_t special_props_t;
 
     //! tells the host which unit to use
-    enum unit_t{
+    enum unit_t {
         UNIT_RX   = int('r'),
         UNIT_TX   = int('t'),
         UNIT_BOTH = int('b'),
     };
 
     //! aux dac selection enums (per unit)
-    enum aux_dac_t{
+    enum aux_dac_t {
         AUX_DAC_A = int('a'),
         AUX_DAC_B = int('b'),
         AUX_DAC_C = int('c'),
@@ -80,14 +72,11 @@ public:
     };
 
     //! aux adc selection enums (per unit)
-    enum aux_adc_t{
-        AUX_ADC_A = int('a'),
-        AUX_ADC_B = int('b')
-    };
+    enum aux_adc_t { AUX_ADC_A = int('a'), AUX_ADC_B = int('b') };
 
     typedef uhd::usrp::gpio_atr::gpio_atr_reg_t atr_reg_t;
 
-    virtual ~dboard_iface(void) {};
+    virtual ~dboard_iface(void){};
 
     /*!
      * Get special properties information for this dboard slot.
@@ -122,9 +111,7 @@ public:
      * \param value 16-bits, 0=GPIO controlled, 1=ATR controlled
      * \param mask 16-bits, 0=do not change, 1=change value
      */
-    virtual void set_pin_ctrl(
-        unit_t unit, boost::uint32_t value, boost::uint32_t mask = 0xffff
-    ) = 0;
+    virtual void set_pin_ctrl(unit_t unit, uint32_t value, uint32_t mask = 0xffff) = 0;
 
     /*!
      * Read back the pin control setting.
@@ -132,7 +119,7 @@ public:
      * \param unit which unit rx or tx
      * \return the 16-bit settings value
      */
-    virtual boost::uint32_t get_pin_ctrl(unit_t unit) = 0;
+    virtual uint32_t get_pin_ctrl(unit_t unit) = 0;
 
     /*!
      * Set a daughterboard ATR register.
@@ -143,8 +130,7 @@ public:
      * \param mask 16-bits, 0=do not change, 1=change value
      */
     virtual void set_atr_reg(
-        unit_t unit, atr_reg_t reg, boost::uint32_t value, boost::uint32_t mask = 0xffff
-    ) = 0;
+        unit_t unit, atr_reg_t reg, uint32_t value, uint32_t mask = 0xffff) = 0;
 
     /*!
      * Read back an ATR register setting.
@@ -153,7 +139,7 @@ public:
      * \param reg which ATR register
      * \return the 16-bit settings value
      */
-    virtual boost::uint32_t get_atr_reg(unit_t unit, atr_reg_t reg) = 0;
+    virtual uint32_t get_atr_reg(unit_t unit, atr_reg_t reg) = 0;
 
     /*!
      * Set daughterboard GPIO data direction setting.
@@ -162,9 +148,7 @@ public:
      * \param value 16-bits, 0=GPIO input, 1=GPIO output
      * \param mask 16-bits, 0=do not change, 1=change value
      */
-    virtual void set_gpio_ddr(
-        unit_t unit, boost::uint32_t value, boost::uint32_t mask = 0xffff
-    ) = 0;
+    virtual void set_gpio_ddr(unit_t unit, uint32_t value, uint32_t mask = 0xffff) = 0;
 
     /*!
      * Read back the GPIO data direction setting.
@@ -172,7 +156,7 @@ public:
      * \param unit which unit rx or tx
      * \return the 16-bit settings value
      */
-    virtual boost::uint32_t get_gpio_ddr(unit_t unit) = 0;
+    virtual uint32_t get_gpio_ddr(unit_t unit) = 0;
 
     /*!
      * Set daughterboard GPIO pin output setting.
@@ -181,9 +165,7 @@ public:
      * \param value 16-bits, 0=GPIO output low, 1=GPIO output high
      * \param mask 16-bits, 0=do not change, 1=change value
      */
-    virtual void set_gpio_out(
-        unit_t unit, boost::uint32_t value, boost::uint32_t mask = 0xffff
-    ) = 0;
+    virtual void set_gpio_out(unit_t unit, uint32_t value, uint32_t mask = 0xffff) = 0;
 
     /*!
      * Read back the GPIO pin output setting.
@@ -191,7 +173,7 @@ public:
      * \param unit which unit rx or tx
      * \return the 16-bit settings value
      */
-    virtual boost::uint32_t get_gpio_out(unit_t unit) = 0;
+    virtual uint32_t get_gpio_out(unit_t unit) = 0;
 
     /*!
      * Read daughterboard GPIO pin values.
@@ -199,7 +181,7 @@ public:
      * \param unit which unit rx or tx
      * \return the value of the gpio unit
      */
-    virtual boost::uint32_t read_gpio(unit_t unit) = 0;
+    virtual uint32_t read_gpio(unit_t unit) = 0;
 
     /*!
      * Write data to SPI bus peripheral.
@@ -210,11 +192,7 @@ public:
      * \param num_bits the number of bits in data
      */
     virtual void write_spi(
-        unit_t unit,
-        const spi_config_t &config,
-        boost::uint32_t data,
-        size_t num_bits
-    ) = 0;
+        unit_t unit, const spi_config_t& config, uint32_t data, size_t num_bits) = 0;
 
     /*!
      * Read and write data to SPI bus peripheral.
@@ -225,12 +203,8 @@ public:
      * \param num_bits the number of bits in data
      * \return the data that was read
      */
-    virtual boost::uint32_t read_write_spi(
-        unit_t unit,
-        const spi_config_t &config,
-        boost::uint32_t data,
-        size_t num_bits
-    ) = 0;
+    virtual uint32_t read_write_spi(
+        unit_t unit, const spi_config_t& config, uint32_t data, size_t num_bits) = 0;
 
     /*!
      * Set the rate of a dboard clock.
@@ -280,11 +254,16 @@ public:
      * \param fe_name name of the front-end to update
      * \param fe_conn connection parameters class
      */
-    virtual void set_fe_connection(
-        unit_t unit,
+    virtual void set_fe_connection(unit_t unit,
         const std::string& fe_name,
-        const uhd::usrp::fe_connection_t& fe_conn
-    ) = 0;
+        const uhd::usrp::fe_connection_t& fe_conn) = 0;
+
+    /*! Returns the true if set_fe_connection() is implemented on this dboard_iface
+     */
+    virtual bool has_set_fe_connection(const unit_t)
+    {
+        return false;
+    }
 
     /*!
      * Get the command time.
@@ -305,6 +284,6 @@ public:
     virtual void sleep(const boost::chrono::nanoseconds& time);
 };
 
-}} //namespace
+}} // namespace uhd::usrp
 
 #endif /* INCLUDED_UHD_USRP_DBOARD_IFACE_HPP */

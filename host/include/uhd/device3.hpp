@@ -1,26 +1,17 @@
 //
 // Copyright 2014-2016 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #ifndef INCLUDED_UHD_DEVICE3_HPP
 #define INCLUDED_UHD_DEVICE3_HPP
 
 #include <uhd/device.hpp>
-#include <uhd/rfnoc/graph.hpp>
 #include <uhd/rfnoc/block_ctrl_base.hpp>
+#include <uhd/rfnoc/graph.hpp>
+#include <boost/thread/mutex.hpp>
 #include <boost/units/detail/utility.hpp>
 #include <vector>
 
@@ -33,15 +24,15 @@ namespace uhd {
  * - They support RFNoC (RF Network-on-Chip).
  * - Data transport uses the compressed VITA (CVITA/CHDR) data format.
  */
-class UHD_API device3 : public uhd::device {
-
-  public:
+class UHD_API device3 : public uhd::device
+{
+public:
     typedef boost::shared_ptr<device3> sptr;
 
     //! Same as uhd::device::make(), but will fail if not actually a device3
-    static sptr make(const device_addr_t &hint, const size_t which = 0);
+    static sptr make(const device_addr_t& hint, const size_t which = 0);
 
-    virtual rfnoc::graph::sptr create_graph(const std::string &name="") = 0;
+    virtual rfnoc::graph::sptr create_graph(const std::string& name = "") = 0;
 
     /*! Reset blocks after a stream.
      *
@@ -53,15 +44,16 @@ class UHD_API device3 : public uhd::device {
      *
      * \param block_id Canonical block name (e.g. "0/FFT_1").
      * \return true if a block with the specified id exists
+     * \note this access is not thread safe if peformed during block enumeration
      */
-    bool has_block(const rfnoc::block_id_t &block_id) const;
+    bool has_block(const rfnoc::block_id_t& block_id) const;
 
     /*! Same as has_block(), but with a type check.
      *
      * \return true if a block of type T with the specified id exists
+     * \note this access is not thread safe if peformed during block enumeration
      */
-    template <typename T>
-    bool has_block(const rfnoc::block_id_t &block_id) const
+    template <typename T> bool has_block(const rfnoc::block_id_t& block_id) const
     {
         if (has_block(block_id)) {
             return bool(boost::dynamic_pointer_cast<T>(get_block_ctrl(block_id)));
@@ -76,8 +68,9 @@ class UHD_API device3 : public uhd::device {
      * on this device), it will throw a uhd::lookup_error.
      *
      * \param block_id Canonical block name (e.g. "0/FFT_1").
+     * \note this access is not thread safe if peformed during block enumeration
      */
-    rfnoc::block_ctrl_base::sptr get_block_ctrl(const rfnoc::block_id_t &block_id) const;
+    rfnoc::block_ctrl_base::sptr get_block_ctrl(const rfnoc::block_id_t& block_id) const;
 
     /*! Same as get_block_ctrl(), but with a type cast.
      *
@@ -88,18 +81,22 @@ class UHD_API device3 : public uhd::device {
      *
      * \code{.cpp}
      * // Assume DEV is a device3::sptr
-     * uhd::rfnoc::my_block_ctrl::sptr block_controller = get_block_ctrl<my_block_ctrl>("0/MyBlock_0");
+     * uhd::rfnoc::my_block_ctrl::sptr block_controller =
+     * get_block_ctrl<my_block_ctrl>("0/MyBlock_0");
      * block_controller->my_own_block_method();
      * \endcode
+     * \note this access is not thread safe if peformed during block enumeration
      */
     template <typename T>
-    boost::shared_ptr<T> get_block_ctrl(const rfnoc::block_id_t &block_id) const
+    boost::shared_ptr<T> get_block_ctrl(const rfnoc::block_id_t& block_id) const
     {
-        boost::shared_ptr<T> blk = boost::dynamic_pointer_cast<T>(get_block_ctrl(block_id));
+        boost::shared_ptr<T> blk =
+            boost::dynamic_pointer_cast<T>(get_block_ctrl(block_id));
         if (blk) {
             return blk;
         } else {
-            throw uhd::lookup_error(str(boost::format("This device does not have a block of type %s with ID: %s")
+            throw uhd::lookup_error(str(
+                boost::format("This device does not have a block of type %s with ID: %s")
                 % boost::units::detail::demangle(typeid(T).name())
                 % block_id.to_string()));
         }
@@ -113,15 +110,16 @@ class UHD_API device3 : public uhd::device {
      * use the templated version of this function, e.g.
      * \code{.cpp}
      * // Assume DEV is a device3::sptr
-     * null_block_ctrl::sptr null_block = DEV->find_blocks<null_block_ctrl>("NullSrcSink");
-     * \endcode
+     * null_block_ctrl::sptr null_block =
+     * DEV->find_blocks<null_block_ctrl>("NullSrcSink"); \endcode \note this access is not
+     * thread safe if peformed during block enumeration
      */
-    std::vector<rfnoc::block_id_t> find_blocks(const std::string &block_id_hint) const;
+    std::vector<rfnoc::block_id_t> find_blocks(const std::string& block_id_hint) const;
 
     /*! Type-cast version of find_blocks().
      */
     template <typename T>
-    std::vector<rfnoc::block_id_t> find_blocks(const std::string &block_id_hint) const
+    std::vector<rfnoc::block_id_t> find_blocks(const std::string& block_id_hint) const
     {
         std::vector<rfnoc::block_id_t> all_block_ids = find_blocks(block_id_hint);
         std::vector<rfnoc::block_id_t> filt_block_ids;
@@ -133,14 +131,15 @@ class UHD_API device3 : public uhd::device {
         return filt_block_ids;
     }
 
-  protected:
+protected:
     //! List of *all* RFNoC blocks available on this device.
     //  It is the responsibility of the deriving class to make
     //  sure this gets correctly populated.
-    std::vector< rfnoc::block_ctrl_base::sptr > _rfnoc_block_ctrl;
+    std::vector<rfnoc::block_ctrl_base::sptr> _rfnoc_block_ctrl;
+    //! Mutex to protect access to members
+    boost::mutex _block_ctrl_mutex;
 };
 
-} //namespace uhd
+} // namespace uhd
 
 #endif /* INCLUDED_UHD_DEVICE3_HPP */
-// vim: sw=4 et:

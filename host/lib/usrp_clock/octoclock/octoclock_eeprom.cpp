@@ -1,18 +1,8 @@
 //
 // Copyright 2014-2016 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include <uhd/exception.hpp>
@@ -24,8 +14,6 @@
 #include <uhd/utils/byteswap.hpp>
 #include <boost/assign/list_of.hpp>
 #include <boost/asio.hpp>
-#include <boost/lexical_cast.hpp>
-#include <boost/foreach.hpp>
 
 #include <iostream>
 
@@ -41,13 +29,13 @@ using namespace uhd::transport;
  * Implementation
  **********************************************************************/
 void octoclock_eeprom_t::_load(){
-    boost::uint8_t octoclock_data[udp_simple::mtu];
+    uint8_t octoclock_data[udp_simple::mtu];
     const octoclock_packet_t *pkt_in = reinterpret_cast<const octoclock_packet_t*>(octoclock_data);
     const octoclock_fw_eeprom_t *eeprom_in = reinterpret_cast<const octoclock_fw_eeprom_t*>(pkt_in->data);
 
     octoclock_packet_t pkt_out;
     // To avoid replicating sequence numbers between sessions
-    pkt_out.sequence = boost::uint32_t(std::rand());
+    pkt_out.sequence = uint32_t(std::rand());
     size_t len = 0;
 
     UHD_OCTOCLOCK_SEND_AND_RECV(xport, _proto_ver, SEND_EEPROM_CMD, pkt_out, len, octoclock_data);
@@ -57,19 +45,19 @@ void octoclock_eeprom_t::_load(){
         (*this)["mac-addr"] = mac_addr_t::from_bytes(mac_bytes).to_string();
 
         //IP address
-        boost::uint32_t ip_addr = uhd::htonx<boost::uint32_t>(eeprom_in->ip_addr);
+        uint32_t ip_addr = uhd::htonx<uint32_t>(eeprom_in->ip_addr);
         ip_v4::bytes_type ip_addr_bytes;
         memcpy(&ip_addr_bytes, &ip_addr, 4);
         (*this)["ip-addr"] = ip_v4(ip_addr_bytes).to_string();
 
         //Default router
-        boost::uint32_t dr_addr = uhd::htonx<boost::uint32_t>(eeprom_in->dr_addr);
+        uint32_t dr_addr = uhd::htonx<uint32_t>(eeprom_in->dr_addr);
         ip_v4::bytes_type dr_addr_bytes;
         memcpy(&dr_addr_bytes, &dr_addr, 4);
         (*this)["gateway"] = ip_v4(dr_addr_bytes).to_string();
 
         //Netmask
-        boost::uint32_t netmask = uhd::htonx<boost::uint32_t>(eeprom_in->netmask);
+        uint32_t netmask = uhd::htonx<uint32_t>(eeprom_in->netmask);
         ip_v4::bytes_type netmask_bytes;
         memcpy(&netmask_bytes, &netmask, 4);
         (*this)["netmask"] = ip_v4(netmask_bytes).to_string();
@@ -85,18 +73,18 @@ void octoclock_eeprom_t::_load(){
         (*this)["name"] = bytes_to_string(name_bytes);
 
         //Revision
-        (*this)["revision"] = boost::lexical_cast<std::string>(int(eeprom_in->revision));
+        (*this)["revision"] = std::to_string(int(eeprom_in->revision));
     }
     else throw uhd::runtime_error("Error loading OctoClock EEPROM.");
 }
 
 void octoclock_eeprom_t::_store() const {
-    boost::uint8_t octoclock_data[udp_simple::mtu];
+    uint8_t octoclock_data[udp_simple::mtu];
     const octoclock_packet_t *pkt_in = reinterpret_cast<const octoclock_packet_t *>(octoclock_data);
 
     octoclock_packet_t pkt_out;
     // To avoid replicating sequence numbers between sessions
-    pkt_out.sequence = boost::uint32_t(std::rand());
+    pkt_out.sequence = uint32_t(std::rand());
     pkt_out.len = sizeof(octoclock_fw_eeprom_t);
     size_t len = 0;
 
@@ -112,21 +100,21 @@ void octoclock_eeprom_t::_store() const {
     if((*this).has_key("ip-addr")){
         ip_v4::bytes_type ip_addr_bytes = ip_v4::from_string((*this)["ip-addr"]).to_bytes();
         memcpy(&eeprom_out->ip_addr, &ip_addr_bytes, 4);
-        eeprom_out->ip_addr = uhd::htonx<boost::uint32_t>(eeprom_out->ip_addr);
+        eeprom_out->ip_addr = uhd::htonx<uint32_t>(eeprom_out->ip_addr);
     }
 
     //Default router
     if((*this).has_key("gateway")){
         ip_v4::bytes_type dr_addr_bytes = ip_v4::from_string((*this)["gateway"]).to_bytes();
         memcpy(&eeprom_out->dr_addr, &dr_addr_bytes, 4);
-        eeprom_out->dr_addr = uhd::htonx<boost::uint32_t>(eeprom_out->dr_addr);
+        eeprom_out->dr_addr = uhd::htonx<uint32_t>(eeprom_out->dr_addr);
     }
 
     //Netmask
     if((*this).has_key("netmask")){
         ip_v4::bytes_type netmask_bytes = ip_v4::from_string((*this)["netmask"]).to_bytes();
         memcpy(&eeprom_out->netmask, &netmask_bytes, 4);
-        eeprom_out->netmask = uhd::htonx<boost::uint32_t>(eeprom_out->netmask);
+        eeprom_out->netmask = uhd::htonx<uint32_t>(eeprom_out->netmask);
     }
 
     //Serial

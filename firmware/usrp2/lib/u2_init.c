@@ -26,8 +26,6 @@
 #include "clocks.h"
 #include "usrp2/fw_common.h"
 #include "nonstdio.h"
-#include "ltc2185.h"
-#include <clocks.h>
 
 /*
  * We ought to arrange for this to be called before main, but for now,
@@ -45,13 +43,6 @@ u2_init(void)
   // set up the default clocks
   clocks_init();
 
-  output_regs->phy_ctrl |= 0x01;		//PHY_RESET
-  mdelay(300);
-  output_regs->phy_ctrl &= ~0x01;
-
-  // set up ADC reg's
-  ltc2185_init();
-
   hal_uart_init();
 
   // init i2c so we can read our rev
@@ -60,45 +51,18 @@ u2_init(void)
   hal_enable_ints();
 
   // flash all leds to let us know board is alive
+#ifndef BOOTLOADER
   hal_set_led_src(0x0, 0x1f); /* software ctrl */
   hal_set_leds(0x0, 0x1f);    mdelay(300);
-
-  for(int i =0; i<300;i++){
-	  hal_set_leds(0x0, LED_E);
-	  for(int j=299;j>=0;j--)
-		  if(i==j)
-			  hal_set_leds(LED_E, LED_E);
-  }
-
-  for(int i =0; i<300;i++){
-	  hal_set_leds(0x0, LED_C);
-	  for(int j=299;j>=0;j--)
-  		  if(i==j)
-  			hal_set_leds(LED_C, LED_C);
-    }
-
-  for(int i =0; i<300;i++){
-	  hal_set_leds(0x0, LED_A);
-  	  for(int j=299;j>=0;j--)
-  		  if(i==j)
-  			hal_set_leds(LED_A, LED_A);
-    }
-
-  //hal_set_leds(LED_E, LED_E); mdelay(300);
-  //hal_set_leds(LED_C, LED_C); mdelay(300);
-  //hal_set_leds(LED_A, LED_A); mdelay(300);
-
-  for (int k = 0; k < 3; k++){ //blink all
+  hal_set_leds(LED_E, LED_E); mdelay(300);
+  hal_set_leds(LED_C, LED_C); mdelay(300);
+  hal_set_leds(LED_A, LED_A); mdelay(300);
+  for (int i = 0; i < 3; i++){ //blink all
     static const int blinks = LED_E | LED_C | LED_A;
-    for(int i =0; i<200;i++){
-    	hal_set_leds(0x0,    0x1f);
-      	  for(int j=199;j>=0;j--)
-      		  if(i==j)
-      			hal_set_leds(blinks, 0x1f);
-        }
+    hal_set_leds(0x0,    0x1f); mdelay(100);
+    hal_set_leds(blinks, 0x1f); mdelay(100);
   }
-    //hal_set_leds(0x0,    0x1f); mdelay(100);
-    //hal_set_leds(blinks, 0x1f); mdelay(100);
+#endif
   hal_set_led_src(0x1f & ~LED_D, 0x1f); /* hardware ctrl */
   hal_set_leds(LED_D, 0x1f);  // Leave one on
 

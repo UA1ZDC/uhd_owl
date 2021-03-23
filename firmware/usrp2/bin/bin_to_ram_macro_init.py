@@ -4,7 +4,6 @@ import struct
 import sys
 
 BOOTRAM_SIZE = 16384
-#BOOTRAM_SIZE = 32768
 
 def do_8_words(ofile, which_ram, row, words):
     ofile.write("defparam bootram.RAM%d.INIT_%02X=256'h" % (which_ram, row))
@@ -30,7 +29,7 @@ def bin_to_ram_macro_init(bin_input_file, ram_init_output_file):
 
     for q in range(0, BOOTRAM_SIZE/4, 512):
         for i in range(q, min(q+512, len(words)), 8):
-            do_8_words(ofile, int(q / 1024), (i/8) % 128, words[i:i+8])
+            do_8_words(ofile, int(q / 512), (i/8) % 64, words[i:i+8])
 
 if __name__ == '__main__':
     if len(sys.argv) != 3:

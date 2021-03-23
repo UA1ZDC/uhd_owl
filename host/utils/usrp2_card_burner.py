@@ -1,19 +1,9 @@
 #!/usr/bin/env python
 #
 # Copyright 2010-2011 Ettus Research LLC
+# Copyright 2018 Ettus Research, a National Instruments Company
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 
 import platform
@@ -33,10 +23,10 @@ import re
 # constants
 ########################################################################
 SECTOR_SIZE = 512                 # bytes
-MAX_FILE_SIZE =  1 * (2**24)      # maximum number of bytes we'll burn to a slot
+MAX_FILE_SIZE =  1 * (2**20)      # maximum number of bytes we'll burn to a slot
 
 FPGA_OFFSET = 0                   # offset in flash to fpga image
-FIRMWARE_OFFSET = 1 * (2**24)     # offset in flash to firmware image
+FIRMWARE_OFFSET = 1 * (2**20)     # offset in flash to firmware image
 
 MAX_SD_CARD_SIZE = 2048e6         # bytes (any bigger is sdhc)
 

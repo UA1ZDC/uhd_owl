@@ -1,18 +1,8 @@
 //
 // Copyright 2015-2016 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #ifndef INCLUDED_UHD_CONFIG_H
@@ -67,11 +57,17 @@ typedef ptrdiff_t ssize_t;
 #endif
 
 // API declaration macro
-#ifdef UHD_DLL_EXPORTS
-    #define UHD_API UHD_EXPORT
+
+// Define API declaration macro
+#ifdef UHD_STATIC_LIB
+    #define UHD_API
 #else
-    #define UHD_API UHD_IMPORT
-#endif // UHD_DLL_EXPORTS
+    #ifdef UHD_DLL_EXPORTS
+        #define UHD_API UHD_EXPORT
+    #else
+        #define UHD_API UHD_IMPORT
+    #endif // UHD_DLL_EXPORTS
+#endif // UHD_STATIC_LIB
 
 // Platform defines for conditional code:
 // Taken from boost/config/select_platform_config.hpp,

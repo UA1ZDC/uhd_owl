@@ -1,37 +1,25 @@
 //
 // Copyright 2015-2016 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include <cmath>
+#include <stdint.h>
 
 #include <gps.h>
 
-#include <boost/assign/list_of.hpp>
 #include <boost/bind.hpp>
-#include <boost/cstdint.hpp>
 #include "boost/date_time/gregorian/gregorian.hpp"
 #include <boost/format.hpp>
-#include <boost/lexical_cast.hpp>
 #include <boost/thread/shared_mutex.hpp>
 #include <boost/thread.hpp>
 #include <boost/math/special_functions/fpclassify.hpp>
 
 #include <uhd/exception.hpp>
 #include <uhd/usrp/gps_ctrl.hpp>
-#include <uhd/utils/msg.hpp>
+#include <uhd/utils/log.hpp>
 #include <uhd/types/dict.hpp>
 
 #include "gpsd_iface.hpp"
@@ -43,7 +31,7 @@ static const size_t CLICK_RATE = 250000;
 
 class gpsd_iface_impl : public virtual gpsd_iface {
 public:
-    gpsd_iface_impl(const std::string &addr, boost::uint16_t port)
+    gpsd_iface_impl(const std::string &addr, uint16_t port)
         : _detected(false), _bthread(), _timeout_cnt(0)
     {
         boost::unique_lock<boost::shared_mutex> l(_d_mutex);
@@ -64,9 +52,13 @@ public:
         boost::thread t(boost::bind(&gpsd_iface_impl::_thread_fcn ,this));
         _bthread.swap(t);
 
-
-        _sensors = boost::assign::list_of<std::string>("gps_locked")("gps_time") \
-            ("gps_position")("gps_gpgga")("gps_gprmc").to_container(_sensors);
+        _sensors = {
+            "gps_locked",
+            "gps_time",
+            "gps_position",
+            "gps_gpgga",
+            "gps_gprmc"
+        };
     }
 
     virtual ~gpsd_iface_impl(void)
@@ -127,7 +119,11 @@ private: // member functions
                 _timeout_cnt = 0;
                 _detected = true;
 
+#if GPSD_API_MAJOR_VERSION < 7
                 if (gps_read(&_gps_data) < 0)
+#else
+                if (gps_read(&_gps_data, NULL, 0) < 0)
+#endif
                     throw std::runtime_error("error while reading");
             }
         }
@@ -139,7 +135,7 @@ private: // member functions
         return _gps_data.fix.mode >= MODE_2D;
     }
 
-    std::time_t _epoch_time(void)
+    int64_t _epoch_time(void)
     {
         boost::shared_lock<boost::shared_mutex> l(_d_mutex);
         return (boost::posix_time::from_time_t(_gps_data.fix.time)
@@ -182,9 +178,9 @@ private: // member functions
         if ((s.at(0) != '$'))
             return 0;
 
-        boost::uint8_t sum = '\0';
+        uint8_t sum = '\0';
         for (size_t i = 1; i < s.size(); i++)
-            sum ^= static_cast<boost::uint8_t>(s.at(i));
+            sum ^= static_cast<uint8_t>(s.at(i));
 
         return sum;
     }
@@ -218,9 +214,9 @@ private: // member functions
         % tm.tm_min
         % tm.tm_sec
         % (_gps_data.status ? 'A' : 'V')
-        % _zeroize(_deg_to_dm(std::fabs(_gps_data.fix.latitude)))
+        % _zeroize(_deg_to_dm(std::abs(_gps_data.fix.latitude)))
         % ((_gps_data.fix.latitude > 0) ? 'N' : 'S')
-        % _zeroize(_deg_to_dm(std::fabs(_gps_data.fix.longitude)))
+        % _zeroize(_deg_to_dm(std::abs(_gps_data.fix.longitude)))
         % ((_gps_data.fix.longitude > 0) ? 'E' : 'W')
         % _zeroize(_gps_data.fix.speed * MPS_TO_KNOTS)
         % _zeroize(_gps_data.fix.track)
@@ -250,9 +246,9 @@ private: // member functions
             % tm.tm_hour
             % tm.tm_min
             % tm.tm_sec
-            % _deg_to_dm(std::fabs(_gps_data.fix.latitude))
+            % _zeroize(_deg_to_dm(std::abs(_gps_data.fix.latitude)))
             % ((_gps_data.fix.latitude > 0) ? 'N' : 'S')
-            % _deg_to_dm(std::fabs(_gps_data.fix.longitude))
+            % _zeroize(_deg_to_dm(std::abs(_gps_data.fix.longitude)))
             % ((_gps_data.fix.longitude > 0) ? 'E' : 'W')
             % _gps_data.status
             % _gps_data.satellites_used);
@@ -264,13 +260,13 @@ private: // member functions
                 str(boost::format("%.2f,") % _gps_data.dop.hdop));
 
         if (boost::math::isnan(_gps_data.fix.altitude))
-            string.append(",");
+            string.append(",,");
         else
             string.append(
                 str(boost::format("%.2f,M,") % _gps_data.fix.altitude));
 
         if (boost::math::isnan(_gps_data.separation))
-            string.append(",");
+            string.append(",,");
         else
             string.append(
                 str(boost::format("%.3f,M,") % _gps_data.separation));
@@ -279,7 +275,7 @@ private: // member functions
             string.append(",");
         else {
             string.append(
-                str(boost::format("%3.2f,%s") % std::fabs(mag_var)
+                str(boost::format("%3.2f,%s") % std::abs(mag_var)
                 % (mag_var > 0 ? "E" : "W")));
         }
 
@@ -303,7 +299,7 @@ private: // members
 
 using namespace uhd::usrp;
 
-gpsd_iface::sptr gpsd_iface::make(const std::string &addr, const boost::uint16_t port)
+gpsd_iface::sptr gpsd_iface::make(const std::string &addr, const uint16_t port)
 {
     return gpsd_iface::sptr(new gpsd_iface_impl(addr, port));
 }

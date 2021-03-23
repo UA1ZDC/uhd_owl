@@ -72,6 +72,12 @@ Use custom-built images:
 
     uhd_image_loader --args="type=usrp2,addr=<IP address>" --fw-path="<firmware path>" --fpga-path="<FPGA path>"
 
+If you immediately want to apply this image, add the `reset` argument:
+
+    uhd_image_loader --args="type=usrp2,addr=<IP address>,reset"
+
+The USRP will drop off the network for a brief moment and reboot.
+
 <b>Note:</b> Different hardware revisions require different FPGA images.
 Determine the revision number from the sticker on the rear of the
 chassis. Use this number to select the correct FPGA image for your
@@ -102,7 +108,7 @@ indirectly to a USRP2 through a Gigabit Ethernet switch.
 
 \subsection usrp2_network_setuphost Setup the host interface
 
-The USRP2 communicates at the IP/UDP layer over the gigabit ethernet.
+The USRP2 communicates at the IP/UDP layer over the gigabit Ethernet.
 The default IP address of the USRP2 is **192.168.10.2**. You will need
 to configure the host's Ethernet interface with a static IP address to
 enable communication. An address of **192.168.10.1** and a subnet mask
@@ -189,7 +195,7 @@ IP address are in the previous section of this documentation.
 \subsection usrp2_commprob_firewall Firewall issues
 
 When the IP address is not specified, the device discovery broadcasts
-UDP packets from each ethernet interface. Many firewalls will block the
+UDP packets from each Ethernet interface. Many firewalls will block the
 replies to these broadcast packets. If disabling your system's firewall
 or specifying the IP address yields a discovered device, then your
 firewall may be blocking replies to UDP broadcast packets. If this is
@@ -459,6 +465,13 @@ If you need to change any of there, you should then be able to run:
     usrp_burn_mb_eeprom --key=<key> --val=<val>
 
 to set the 'mac-addr', 'serial' and 'Mboard'.
+
+\subsection usrp2_known_issues Known Issues
+
+- When setting `clock_source` to external, but not providing an external
+  reference, there are cases when a successful lock is reported even though
+  no clock signal is present, which can cause false positives. Terminating the
+  clock input may help in some cases.
 
 */
 // vim:ft=doxygen:

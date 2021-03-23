@@ -1,27 +1,19 @@
 //
 // Copyright 2014-2016 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include <iostream>
 #include <string>
+#include <chrono>
+#include <thread>
 #include <string.h>
+#include <stdint.h>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/asio.hpp>
-#include <boost/cstdint.hpp>
 #include <boost/format.hpp>
 #include <boost/thread/thread.hpp>
 
@@ -48,15 +40,15 @@ namespace uhd{
         _device_state.pos = 0;
         _proto_ver = proto_ver;
         // To avoid replicating sequence numbers between sessions
-        _sequence = boost::uint32_t(std::rand());
+        _sequence = uint32_t(std::rand());
         size_t len = 0;
 
         //Get pool size from device
         octoclock_packet_t pkt_out;
-        pkt_out.sequence = uhd::htonx<boost::uint32_t>(_sequence);
+        pkt_out.sequence = uhd::htonx<uint32_t>(_sequence);
         pkt_out.len = 0;
 
-        boost::uint8_t octoclock_data[udp_simple::mtu];
+        uint8_t octoclock_data[udp_simple::mtu];
         const octoclock_packet_t *pkt_in = reinterpret_cast<octoclock_packet_t*>(octoclock_data);
 
         UHD_OCTOCLOCK_SEND_AND_RECV(_udp, _proto_ver, SEND_POOLSIZE_CMD, pkt_out, len, octoclock_data);
@@ -71,11 +63,11 @@ namespace uhd{
         size_t len = 0;
 
         octoclock_packet_t pkt_out;
-        pkt_out.sequence = uhd::htonx<boost::uint32_t>(++_sequence);
+        pkt_out.sequence = uhd::htonx<uint32_t>(++_sequence);
         pkt_out.len = buf.size();
         memcpy(pkt_out.data, buf.c_str(), buf.size());
 
-        boost::uint8_t octoclock_data[udp_simple::mtu];
+        uint8_t octoclock_data[udp_simple::mtu];
         const octoclock_packet_t *pkt_in = reinterpret_cast<octoclock_packet_t*>(octoclock_data);
 
         UHD_OCTOCLOCK_SEND_AND_RECV(_udp, _proto_ver, HOST_SEND_TO_GPSDO_CMD, pkt_out, len, octoclock_data);
@@ -86,7 +78,9 @@ namespace uhd{
 
     std::string octoclock_uart_iface::read_uart(double timeout){
         std::string result;
-        boost::system_time exit_time = boost::get_system_time() + boost::posix_time::milliseconds(long(timeout*1e3));
+        const auto exit_time =
+            std::chrono::steady_clock::now()
+            + std::chrono::milliseconds(int64_t(timeout*1e3));
 
         while(true)
         {
@@ -101,11 +95,10 @@ namespace uhd{
                     return result;
                 }
             }
-            if (boost::get_system_time() > exit_time)
-            {
+            if (std::chrono::steady_clock::now() > exit_time) {
                 break;
             }
-            boost::this_thread::sleep(boost::posix_time::milliseconds(1));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
 
         return result;
@@ -116,7 +109,7 @@ namespace uhd{
         pkt_out.len = 0;
         size_t len = 0;
 
-        boost::uint8_t octoclock_data[udp_simple::mtu];
+        uint8_t octoclock_data[udp_simple::mtu];
         const octoclock_packet_t *pkt_in = reinterpret_cast<octoclock_packet_t*>(octoclock_data);
 
         if(STATES_EQUAL){
@@ -124,7 +117,7 @@ namespace uhd{
             boost::posix_time::time_duration age = time - _last_cache_update;
             bool cache_expired = (age > boost::posix_time::seconds(MAX_CACHE_AGE));
 
-            pkt_out.sequence = uhd::htonx<boost::uint32_t>(++_sequence);
+            pkt_out.sequence = uhd::htonx<uint32_t>(++_sequence);
             UHD_OCTOCLOCK_SEND_AND_RECV(_udp, _proto_ver, SEND_GPSDO_CACHE_CMD, pkt_out, len, octoclock_data);
             if(UHD_OCTOCLOCK_PACKET_MATCHES(SEND_GPSDO_CACHE_ACK, pkt_out, pkt_in, len)){
                 memcpy(&_cache[0], pkt_in->data, _poolsize);
@@ -132,7 +125,7 @@ namespace uhd{
                 _last_cache_update = time;
             }
 
-            boost::uint8_t delta_wraps = (_device_state.num_wraps - _state.num_wraps);
+            uint8_t delta_wraps = (_device_state.num_wraps - _state.num_wraps);
             if(cache_expired or delta_wraps > 1 or
                ((delta_wraps == 1) and (_device_state.pos > _state.pos))){
 

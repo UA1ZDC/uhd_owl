@@ -40,12 +40,8 @@ def convert_version_string(version, to_debian=True):
     else:
         return "## {0}".format(".".join("{0:03d}".format(int(num)) for num in version.split(".")))
 
-#
-# The "trusty" string below doesn't need to be changed, even when Trusty loses support. The script
-# to upload packages replaces it anyway.
-#
 def get_header(version):
-    return "uhd ({0}-0ubuntu1) trusty; urgency=low\n\n".format(convert_version_string(version))
+    return "uhd ({0}-0ubuntu1) ubuntu_release; urgency=low\n\n".format(convert_version_string(version))
 
 def get_footer(uploader_name, uploader_email):
     return " -- {0} <{1}>  {2}\n\n".format(uploader_name, uploader_email, datetime.datetime.now().strftime("%a, %d %b %Y %I:%M:%S %Z-0800"))
@@ -77,13 +73,7 @@ if __name__ == "__main__":
     lines_in = f.readlines()
     f.close()
 
-    # Output file
-    if os.path.exists(os.path.normpath(options.output_file)):
-        g = open(options.output_file, "r")
-        lines_out = g.readlines()
-        g.close()
-    else:
-        lines_out = []
+    lines_out = []
 
     g = open(options.output_file, "w")
 
@@ -113,6 +103,9 @@ if __name__ == "__main__":
         else:
             # Actual changes
             new_lines_out += ["  " + line]
+    # Final footer
+    new_lines_out += ["\n"]
+    new_lines_out += [get_footer(options.uploader_name, options.uploader_email)]
 
     new_lines_out += lines_out
     for line in new_lines_out:

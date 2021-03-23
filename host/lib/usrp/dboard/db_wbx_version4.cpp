@@ -1,18 +1,8 @@
 //
 // Copyright 2011-2014 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include "db_wbx_common.hpp"
@@ -22,7 +12,7 @@
 #include <uhd/types/sensors.hpp>
 #include <uhd/utils/assert_has.hpp>
 #include <uhd/utils/algorithm.hpp>
-#include <uhd/utils/msg.hpp>
+
 #include <uhd/usrp/dboard_base.hpp>
 #include <boost/assign/list_of.hpp>
 #include <boost/format.hpp>
@@ -64,9 +54,9 @@ static int tx_pga0_gain_to_iobits(double &gain){
             (attn_code &  1 ? 0 : TX_ATTN_1)
         ) & TX_ATTN_MASK;
 
-    UHD_LOGV(often) << boost::format(
+    UHD_LOGGER_TRACE("WBX") << boost::format(
         "WBX TX Attenuation: %f dB, Code: %d, IO Bits %x, Mask: %x"
-    ) % attn % attn_code % (iobits & TX_ATTN_MASK) % TX_ATTN_MASK << std::endl;
+    ) % attn % attn_code % (iobits & TX_ATTN_MASK) % TX_ATTN_MASK ;
 
     //the actual gain setting
     gain = wbx_v4_tx_gain_ranges["PGA0"].stop() - double(attn_code);
@@ -87,7 +77,7 @@ wbx_base::wbx_version4::wbx_version4(wbx_base *_self_wbx_base) {
     ////////////////////////////////////////////////////////////////////
     // Register RX properties
     ////////////////////////////////////////////////////////////////////
-    boost::uint16_t rx_id = _self_wbx_base->get_rx_id().to_uint16();
+    uint16_t rx_id = _self_wbx_base->get_rx_id().to_uint16();
 
     if(rx_id == 0x0063) this->get_rx_subtree()->create<std::string>("name").set("WBXv4 RX");
     else if(rx_id == 0x0081) this->get_rx_subtree()->create<std::string>("name").set("WBX-120 RX");
@@ -103,7 +93,7 @@ wbx_base::wbx_version4::wbx_version4(wbx_base *_self_wbx_base) {
     //get_tx_id() will always return GDB ID, so use RX ID to determine WBXv4 vs. WBX-120
     if(rx_id == 0x0063) this->get_tx_subtree()->create<std::string>("name").set("WBXv4 TX");
     else if(rx_id == 0x0081) this->get_tx_subtree()->create<std::string>("name").set("WBX-120 TX");
-    BOOST_FOREACH(const std::string &name, wbx_v4_tx_gain_ranges.keys()){
+    for(const std::string &name:  wbx_v4_tx_gain_ranges.keys()){
         self_base->get_tx_subtree()->create<double>("gains/"+name+"/value")
             .set_coercer(boost::bind(&wbx_base::wbx_version4::set_tx_gain, this, _1, name))
             .set(wbx_v4_tx_gain_ranges[name].start());
@@ -182,7 +172,7 @@ void wbx_base::wbx_version4::set_tx_enabled(bool enb) {
 double wbx_base::wbx_version4::set_tx_gain(double gain, const std::string &name) {
     assert_has(wbx_v4_tx_gain_ranges.keys(), name, "wbx tx gain name");
     if(name == "PGA0"){
-        boost::uint16_t io_bits = tx_pga0_gain_to_iobits(gain);
+        uint16_t io_bits = tx_pga0_gain_to_iobits(gain);
 
         self_base->_tx_gains[name] = gain;
 
@@ -204,9 +194,9 @@ double wbx_base::wbx_version4::set_lo_freq(dboard_iface::unit_t unit, double tar
     //clip to tuning range
     target_freq = wbx_v4_freq_range.clip(target_freq);
 
-    UHD_LOGV(often) << boost::format(
+    UHD_LOGGER_TRACE("WBX") << boost::format(
         "WBX tune: target frequency %f MHz"
-    ) % (target_freq/1e6) << std::endl;
+    ) % (target_freq/1e6) ;
 
     /*
      * If the user sets 'mode_n=integer' in the tuning args, the user wishes to

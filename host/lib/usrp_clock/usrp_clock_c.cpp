@@ -1,18 +1,8 @@
 /*
  * Copyright 2015 Ettus Research LLC
+ * Copyright 2018 Ettus Research, a National Instruments Company
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 /* C-Interface for multi_usrp_clock */
@@ -22,7 +12,6 @@
 
 #include <uhd/usrp_clock/usrp_clock.h>
 
-#include <boost/foreach.hpp>
 #include <boost/thread/mutex.hpp>
 
 #include <string.h>
@@ -64,7 +53,7 @@ uhd_error uhd_usrp_clock_find(
 
         uhd::device_addrs_t devs = uhd::device::find(std::string(args), uhd::device::CLOCK);
         devices_out->string_vector_cpp.clear();
-        BOOST_FOREACH(const uhd::device_addr_t &dev, devs){
+        for(const uhd::device_addr_t &dev:  devs){
             devices_out->string_vector_cpp.push_back(dev.to_string());
         }
     )

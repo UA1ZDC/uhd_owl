@@ -1,18 +1,8 @@
 #
 # Copyright 2014-2015 Ettus Research LLC
+# Copyright 2018 Ettus Research, a National Instruments Company
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-License-Identifier: GPL-3.0
 #
 
 cmake_minimum_required(VERSION 2.8)
@@ -46,6 +36,25 @@ find_package(UHD "3.8.0" REQUIRED)
 #find_package(UHD 3.8.1 EXACT REQUIRED)
 
 ### Configure Compiler ########################################################
+if(CMAKE_VERSION VERSION_LESS "3.1")
+    if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
+        set(CMAKE_CXX_FLAGS "--std=gnu++11 ${CMAKE_CXX_FLAGS}")
+    elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
+        if("${IS_APPLE}" STREQUAL "")
+            set(CMAKE_CXX_FLAGS "-std=c++11 ${CMAKE_CXX_FLAGS}")
+        else()
+            set(CMAKE_CXX_FLAGS "-std=c++11 -stdlib=libc++ ${CMAKE_CXX_FLAGS}")
+        endif()
+    endif()
+else()
+    set(CMAKE_CXX_STANDARD 11)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD" AND ${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
+    set(CMAKE_EXE_LINKER_FLAGS "-lthr ${CMAKE_EXE_LINKER_FLAGS}")
+    set(CMAKE_CXX_FLAGS "-stdlib=libc++ ${CMAKE_CXX_FLAGS}")
+endif()
+
 include_directories(
     ${Boost_INCLUDE_DIRS}
     ${UHD_INCLUDE_DIRS}
@@ -55,13 +64,13 @@ link_directories(${Boost_LIBRARY_DIRS})
 ### Make the executable #######################################################
 add_executable(init_usrp init_usrp.cpp)
 
-SET(CMAKE_BUILD_TYPE "Release")
-MESSAGE(STATUS "******************************************************************************")
-MESSAGE(STATUS "* NOTE: When building your own app, you probably need all kinds of different  ")
-MESSAGE(STATUS "* compiler flags. This is just an example, so it's unlikely these settings    ")
-MESSAGE(STATUS "* exactly match what you require. Make sure to double-check compiler and     ")
-MESSAGE(STATUS "* linker flags to make sure your specific requirements are included.          ")
-MESSAGE(STATUS "******************************************************************************")
+set(CMAKE_BUILD_TYPE "Release")
+message(STATUS "******************************************************************************")
+message(STATUS "* NOTE: When building your own app, you probably need all kinds of different  ")
+message(STATUS "* compiler flags. This is just an example, so it's unlikely these settings    ")
+message(STATUS "* exactly match what you require. Make sure to double-check compiler and     ")
+message(STATUS "* linker flags to make sure your specific requirements are included.          ")
+message(STATUS "******************************************************************************")
 
 # Shared library case: All we need to do is link against the library, and
 # anything else we need (in this case, some Boost libraries):

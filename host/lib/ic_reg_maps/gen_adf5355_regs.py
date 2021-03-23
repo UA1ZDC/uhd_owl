@@ -1,19 +1,9 @@
 #!/usr/bin/env python
 #
 # Copyright 2010 Ettus Research LLC
+# Copyright 2018 Ettus Research, a National Instruments Company
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 
 ########################################################################
@@ -26,7 +16,7 @@ REGS_TMPL="""\
 ########################################################################
 int_16_bit              0[4:19]     0
 prescaler               0[20]       0       4_5, 8_9
-autocal_en              0[21]       0       disabled, enabled
+autocal_en              0[21]       1       disabled, enabled
 reg0_reserved0          0[22:31]    0x000
 ########################################################################
 ## address 1
@@ -53,13 +43,13 @@ counter_reset           4[4]        0       disabled, enabled
 cp_three_state          4[5]        0       disabled, enabled
 power_down              4[6]        0       disabled, enabled
 pd_polarity             4[7]        1       negative, positive
-mux_logic               4[8]        0       1_8V, 3_3V
+mux_logic               4[8]        1       1_8V, 3_3V
 ref_mode                4[9]        0       single, diff
 <% current_setting_enums = ', '.join(map(lambda x: '_'.join(("%0.2fma"%(round(x*31.27 + 31.27)/100)).split('.')), range(0,16))) %>\
-charge_pump_current     4[10:13]    0       ${current_setting_enums}
+charge_pump_current     4[10:13]    2       ${current_setting_enums}
 double_buff_div         4[14]       0       disabled, enabled
 r_counter_10_bit        4[15:24]    0
-reference_divide_by_2   4[25]       1       disabled, enabled
+reference_divide_by_2   4[25]       0       disabled, enabled
 reference_doubler       4[26]       0       disabled, enabled
 muxout                  4[27:29]    1       3state, dvdd, dgnd, rdiv, ndiv, analog_ld, dld, reserved
 reg4_reserved0          4[30:31]    0
@@ -76,7 +66,7 @@ reg6_reserved0          6[7:9]      0x0
 rf_out_b_enabled        6[10]       1       enabled, disabled
 mute_till_lock_detect   6[11]       0       mute_disabled, mute_enabled
 reg6_reserved1          6[12]       0
-cp_bleed_current        6[13:20]    0
+cp_bleed_current        6[13:20]    2
 rf_divider_select       6[21:23]    0       div1, div2, div4, div8, div16, div32, div64
 feedback_select         6[24]       0       divided, fundamental
 reg6_reserved2          6[25:28]    0xA
@@ -91,7 +81,7 @@ frac_n_ld_precision     7[5:6]      0       5ns, 6ns, 8ns, 12ns
 loss_of_lock_mode       7[7]        0       disabled, enabled
 ld_cyc_count            7[8:9]      0       1024, 2048, 4096, 8192
 reg7_reserved0          7[10:24]    0x0
-le_sync                 7[25]       0       disabled, le_synced_to_refin
+le_sync                 7[25]       1       disabled, le_synced_to_refin
 reg7_reserved1          7[26:31]    0x4
 ########################################################################
 ## address 8
@@ -142,13 +132,13 @@ enum addr_t{
     ADDR_R12 = 12
 };
 
-boost::uint32_t get_reg(boost::uint8_t addr){
-    boost::uint32_t reg = addr & 0xF;
+uint32_t get_reg(uint8_t addr){
+    uint32_t reg = addr & 0xF;
     switch(addr){
     % for addr in range(12+1):
     case ${addr}:
         % for reg in filter(lambda r: r.get_addr() == addr, regs):
-        reg |= (boost::uint32_t(${reg.get_name()}) & ${reg.get_mask()}) << ${reg.get_shift()};
+        reg |= (uint32_t(${reg.get_name()}) & ${reg.get_mask()}) << ${reg.get_shift()};
         % endfor
         break;
     % endfor

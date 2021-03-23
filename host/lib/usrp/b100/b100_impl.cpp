@@ -1,47 +1,34 @@
 //
 // Copyright 2012-2014 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-#include "apply_corrections.hpp"
 #include "b100_impl.hpp"
 #include "b100_regs.hpp"
 #include <uhd/transport/usb_control.hpp>
-#include <uhd/utils/msg.hpp>
+#include <uhd/utils/log.hpp>
 #include <uhd/utils/cast.hpp>
 #include <uhd/exception.hpp>
 #include <uhd/utils/static.hpp>
 #include <uhd/utils/paths.hpp>
 #include <uhd/utils/safe_call.hpp>
+#include <uhdlib/usrp/common/apply_corrections.hpp>
 #include <boost/format.hpp>
-#include <boost/assign/list_of.hpp>
-#include <boost/filesystem.hpp>
-#include <boost/thread/thread.hpp>
-#include <boost/lexical_cast.hpp>
 #include <cstdio>
 #include <iostream>
+#include <chrono>
 
 using namespace uhd;
 using namespace uhd::usrp;
 using namespace uhd::transport;
 
-const boost::uint16_t B100_VENDOR_ID  = 0x2500;
-const boost::uint16_t B100_PRODUCT_ID = 0x0002;
-const boost::uint16_t FX2_VENDOR_ID    = 0x04b4;
-const boost::uint16_t FX2_PRODUCT_ID   = 0x8613;
-static const boost::posix_time::milliseconds REENUMERATION_TIMEOUT_MS(3000);
+namespace {
+    constexpr uint16_t B100_VENDOR_ID  = 0x2500;
+    constexpr uint16_t B100_PRODUCT_ID = 0x0002;
+    constexpr int64_t  REENUMERATION_TIMEOUT_MS = 3000;
+}
 
 /***********************************************************************
  * Discovery
@@ -57,11 +44,11 @@ static device_addrs_t b100_find(const device_addr_t &hint)
     //since an address and resource is intended for a different, non-USB, device.
     if (hint.has_key("addr") || hint.has_key("resource")) return b100_addrs;
 
-    boost::uint16_t vid, pid;
+    uint16_t vid, pid;
 
     if(hint.has_key("vid") && hint.has_key("pid") && hint.has_key("type") && hint["type"] == "b100") {
-        vid = uhd::cast::hexstr_cast<boost::uint16_t>(hint.get("vid"));
-        pid = uhd::cast::hexstr_cast<boost::uint16_t>(hint.get("pid"));
+        vid = uhd::cast::hexstr_cast<uint16_t>(hint.get("vid"));
+        pid = uhd::cast::hexstr_cast<uint16_t>(hint.get("pid"));
     } else {
         vid = B100_VENDOR_ID;
         pid = B100_PRODUCT_ID;
@@ -75,17 +62,17 @@ static device_addrs_t b100_find(const device_addr_t &hint)
 
     //find the usrps and load firmware
     size_t found = 0;
-    BOOST_FOREACH(usb_device_handle::sptr handle, usb_device_handle::get_device_list(vid, pid)) {
+    for(usb_device_handle::sptr handle: usb_device_handle::get_device_list(vid,  pid)) {
         //extract the firmware path for the b100
         std::string b100_fw_image;
         try{
             b100_fw_image = find_image_path(hint.get("fw", B100_FW_FILE_NAME));
         }
         catch(...){
-            UHD_MSG(warning) << boost::format("Could not locate B100 firmware. %s\n") % print_utility_error("uhd_images_downloader.py");
+            UHD_LOGGER_WARNING("B100") << boost::format("Could not locate B100 firmware. %s\n") % print_utility_error("uhd_images_downloader.py");
             return b100_addrs;
         }
-        UHD_LOG << "the firmware image: " << b100_fw_image << std::endl;
+        UHD_LOGGER_DEBUG("B100") << "the firmware image: " << b100_fw_image ;
 
         usb_control::sptr control;
         try{control = usb_control::make(handle, 0);}
@@ -99,19 +86,25 @@ static device_addrs_t b100_find(const device_addr_t &hint)
     vid = B100_VENDOR_ID;
     pid = B100_PRODUCT_ID;
 
-    const boost::system_time timeout_time = boost::get_system_time() + REENUMERATION_TIMEOUT_MS;
+    const auto timeout_time =
+        std::chrono::steady_clock::now()
+        + std::chrono::milliseconds(REENUMERATION_TIMEOUT_MS);
 
     //search for the device until found or timeout
-    while (boost::get_system_time() < timeout_time and b100_addrs.empty() and found != 0)
-    {
-        BOOST_FOREACH(usb_device_handle::sptr handle, usb_device_handle::get_device_list(vid, pid))
-        {
+    while (std::chrono::steady_clock::now() < timeout_time
+            and b100_addrs.empty()
+            and found != 0) {
+        for (auto handle : usb_device_handle::get_device_list(vid, pid)) {
             usb_control::sptr control;
-            try{control = usb_control::make(handle, 0);}
-            catch(const uhd::exception &){continue;} //ignore claimed
-
+            try {
+                control = usb_control::make(handle, 0);
+            }
+            catch (const uhd::exception &) {
+                continue; //ignore claimed
+            }
             fx2_ctrl::sptr fx2_ctrl = fx2_ctrl::make(control);
-            const mboard_eeprom_t mb_eeprom = mboard_eeprom_t(*fx2_ctrl, B100_EEPROM_MAP_KEY);
+            const mboard_eeprom_t mb_eeprom =
+                b100_impl::get_mb_eeprom(fx2_ctrl);
             device_addr_t new_addr;
             new_addr["type"] = "b100";
             new_addr["name"] = mb_eeprom["name"];
@@ -120,7 +113,7 @@ static device_addrs_t b100_find(const device_addr_t &hint)
             if (
                 (not hint.has_key("name")   or hint["name"]   == new_addr["name"]) and
                 (not hint.has_key("serial") or hint["serial"] == new_addr["serial"])
-            ){
+               ) {
                 b100_addrs.push_back(new_addr);
             }
         }
@@ -163,7 +156,7 @@ b100_impl::b100_impl(const device_addr_t &device_addr){
 
     //locate the matching handle in the device list
     usb_device_handle::sptr handle;
-    BOOST_FOREACH(usb_device_handle::sptr dev_handle, device_list) {
+    for(usb_device_handle::sptr dev_handle:  device_list) {
         if (dev_handle->get_serial() == device_addr["serial"]){
             handle = dev_handle;
             break;
@@ -204,9 +197,9 @@ b100_impl::b100_impl(const device_addr_t &device_addr){
     //try reset once in the case of failure
     catch(const uhd::exception &ex){
         if (initialization_count > 1) throw;
-        UHD_MSG(warning) <<
+        UHD_LOGGER_WARNING("B100") <<
             "The control endpoint was left in a bad state.\n"
-            "Attempting endpoint re-enumeration...\n" << ex.what() << std::endl;
+            "Attempting endpoint re-enumeration...\n" << ex.what() ;
         _fifo_ctrl.reset();
         _ctrl_transport.reset();
         _fx2_ctrl->usrp_fx2_reset();
@@ -232,9 +225,9 @@ b100_impl::b100_impl(const device_addr_t &device_addr){
     //try reset once in the case of failure
     catch(const uhd::exception &){
         if (initialization_count > 1) throw;
-        UHD_MSG(warning) <<
+        UHD_LOGGER_WARNING("B100") <<
             "The control endpoint was left in a bad state.\n"
-            "Attempting endpoint re-enumeration...\n" << std::endl;
+            "Attempting endpoint re-enumeration...\n" ;
         _fifo_ctrl.reset();
         _ctrl_transport.reset();
         _fx2_ctrl->usrp_fx2_reset();
@@ -261,7 +254,7 @@ b100_impl::b100_impl(const device_addr_t &device_addr){
 
     //let packet padder know the LUT size in number of words32
     const size_t rx_lut_size = size_t(data_xport_args.cast<double>("recv_frame_size", 0.0));
-    _fifo_ctrl->poke32(TOREG(SR_PADDER+0), rx_lut_size/sizeof(boost::uint32_t));
+    _fifo_ctrl->poke32(TOREG(SR_PADDER+0), rx_lut_size/sizeof(uint32_t));
 
     _data_transport = usb_zero_copy_make_wrapper(
         usb_zero_copy::make(
@@ -286,7 +279,7 @@ b100_impl::b100_impl(const device_addr_t &device_addr){
     ////////////////////////////////////////////////////////////////////
     // setup the mboard eeprom
     ////////////////////////////////////////////////////////////////////
-    const mboard_eeprom_t mb_eeprom(*_fx2_ctrl, B100_EEPROM_MAP_KEY);
+    const mboard_eeprom_t mb_eeprom = this->get_mb_eeprom(_fx2_ctrl);
     _tree->create<mboard_eeprom_t>(mb_path / "eeprom")
         .set(mb_eeprom)
         .add_coerced_subscriber(boost::bind(&b100_impl::set_mb_eeprom, this, _1));
@@ -437,7 +430,9 @@ b100_impl::b100_impl(const device_addr_t &device_addr){
     //setup reference source props
     _tree->create<std::string>(mb_path / "clock_source/value")
         .add_coerced_subscriber(boost::bind(&b100_impl::update_clock_source, this, _1));
-    static const std::vector<std::string> clock_sources = boost::assign::list_of("internal")("external")("auto");
+    static const std::vector<std::string> clock_sources = {
+        "internal", "external", "auto"
+    };
     _tree->create<std::vector<std::string> >(mb_path / "clock_source/options").set(clock_sources);
 
     ////////////////////////////////////////////////////////////////////
@@ -480,12 +475,12 @@ b100_impl::b100_impl(const device_addr_t &device_addr){
 
     //bind frontend corrections to the dboard freq props
     const fs_path db_tx_fe_path = mb_path / "dboards" / "A" / "tx_frontends";
-    BOOST_FOREACH(const std::string &name, _tree->list(db_tx_fe_path)){
+    for(const std::string &name:  _tree->list(db_tx_fe_path)){
         _tree->access<double>(db_tx_fe_path / name / "freq" / "value")
             .add_coerced_subscriber(boost::bind(&b100_impl::set_tx_fe_corrections, this, _1));
     }
     const fs_path db_rx_fe_path = mb_path / "dboards" / "A" / "rx_frontends";
-    BOOST_FOREACH(const std::string &name, _tree->list(db_rx_fe_path)){
+    for(const std::string &name:  _tree->list(db_rx_fe_path)){
         _tree->access<double>(db_rx_fe_path / name / "freq" / "value")
             .add_coerced_subscriber(boost::bind(&b100_impl::set_rx_fe_corrections, this, _1));
     }
@@ -506,10 +501,10 @@ b100_impl::b100_impl(const device_addr_t &device_addr){
         .add_coerced_subscriber(boost::bind(&b100_clock_ctrl::set_fpga_clock_rate, _clock_ctrl, _1));
 
     //reset cordic rates and their properties to zero
-    BOOST_FOREACH(const std::string &name, _tree->list(mb_path / "rx_dsps")){
+    for(const std::string &name:  _tree->list(mb_path / "rx_dsps")){
         _tree->access<double>(mb_path / "rx_dsps" / name / "freq" / "value").set(0.0);
     }
-    BOOST_FOREACH(const std::string &name, _tree->list(mb_path / "tx_dsps")){
+    for(const std::string &name:  _tree->list(mb_path / "tx_dsps")){
         _tree->access<double>(mb_path / "tx_dsps" / name / "freq" / "value").set(0.0);
     }
 
@@ -526,7 +521,7 @@ b100_impl::~b100_impl(void){
 
 void b100_impl::check_fw_compat(void){
     unsigned char data[4]; //useless data buffer
-    const boost::uint16_t fw_compat_num = _fx2_ctrl->usrp_control_read(
+    const uint16_t fw_compat_num = _fx2_ctrl->usrp_control_read(
         VRQ_FW_COMPAT, 0, 0, data, sizeof(data)
     );
     if (fw_compat_num != B100_FW_COMPAT_NUM){
@@ -540,8 +535,8 @@ void b100_impl::check_fw_compat(void){
 }
 
 void b100_impl::check_fpga_compat(void){
-    const boost::uint32_t fpga_compat_num = _fifo_ctrl->peek32(REG_RB_COMPAT);
-    boost::uint16_t fpga_major = fpga_compat_num >> 16, fpga_minor = fpga_compat_num & 0xffff;
+    const uint32_t fpga_compat_num = _fifo_ctrl->peek32(REG_RB_COMPAT);
+    uint16_t fpga_major = fpga_compat_num >> 16, fpga_minor = fpga_compat_num & 0xffff;
     if (fpga_major == 0){ //old version scheme
         fpga_major = fpga_minor;
         fpga_minor = 0;
@@ -562,10 +557,6 @@ double b100_impl::update_rx_codec_gain(const double gain){
     _codec_ctrl->set_rx_pga_gain(gain, 'A');
     _codec_ctrl->set_rx_pga_gain(gain, 'B');
     return _codec_ctrl->get_rx_pga_gain('A');
-}
-
-void b100_impl::set_mb_eeprom(const uhd::usrp::mboard_eeprom_t &mb_eeprom){
-    mb_eeprom.commit(*_fx2_ctrl, B100_EEPROM_MAP_KEY);
 }
 
 void b100_impl::set_db_eeprom(const std::string &type, const uhd::usrp::dboard_eeprom_t &db_eeprom){

@@ -1,30 +1,19 @@
 //
 // Copyright 2015 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include <uhd/exception.hpp>
-#include <boost/shared_ptr.hpp>
-#include <boost/lexical_cast.hpp>
 #include <boost/function.hpp>
 #include <boost/make_shared.hpp>
-#include <vector>
+#include <boost/shared_ptr.hpp>
 #include <map>
+#include <vector>
 
 #ifndef INCLUDED_LIBUHD_RFNOC_NOCSCRIPT_EXPR_HPP
-#define INCLUDED_LIBUHD_RFNOC_NOCSCRIPT_EXPR_HPP
+#    define INCLUDED_LIBUHD_RFNOC_NOCSCRIPT_EXPR_HPP
 
 namespace uhd { namespace rfnoc { namespace nocscript {
 
@@ -35,17 +24,11 @@ class expression_literal;
  */
 class expression
 {
-  public:
+public:
     typedef boost::shared_ptr<expression> sptr;
 
     //! All the possible return types for expressions within Noc-Script
-    enum type_t {
-        TYPE_INT,
-        TYPE_DOUBLE,
-        TYPE_STRING,
-        TYPE_BOOL,
-        TYPE_INT_VECTOR
-    };
+    enum type_t { TYPE_INT, TYPE_DOUBLE, TYPE_STRING, TYPE_BOOL, TYPE_INT_VECTOR };
 
     // TODO make this a const and fix the [] usage
     static std::map<type_t, std::string> type_repr;
@@ -64,31 +47,32 @@ class expression
  */
 class expression_literal : public expression
 {
-  public:
+public:
     typedef boost::shared_ptr<expression_literal> sptr;
 
-    template <typename expr_type>
-    static sptr make(expr_type x) { return boost::make_shared<expression_literal>(x); };
+    template <typename expr_type> static sptr make(expr_type x)
+    {
+        return boost::make_shared<expression_literal>(x);
+    };
 
     /*! Generate the literal expression from its token string representation.
      * This includes markup, e.g. a string would still have the quotes, and
      * a hex value would still have leading 0x.
      */
-    expression_literal(
-            const std::string token_val,
-            expression::type_t type
-    );
+    expression_literal(const std::string token_val, expression::type_t type);
 
     //! Create a boolean literal expression from a C++ bool.
-    expression_literal(bool b=false);
+    expression_literal(bool b = false);
     //! Create an integer literal expression from a C++ int.
     expression_literal(int i);
     //! Create a double literal expression from a C++ double.
     expression_literal(double d);
     //! Create a string literal expression from a C++ string.
-    expression_literal(const std::string &s);
+    expression_literal(const std::string& s);
     //! Create an int vector literal expression from a C++ vector<int>.
     expression_literal(std::vector<int> v);
+
+    virtual ~expression_literal() {}
 
     expression::type_t infer_type() const
     {
@@ -160,9 +144,9 @@ class expression_literal : public expression
     //! String representation
     std::string repr() const;
 
-    bool operator==(const expression_literal &rhs) const;
+    bool operator==(const expression_literal& rhs) const;
 
-  private:
+private:
     //! For TYPE_BOOL
     bool _bool_val;
 
@@ -182,13 +166,13 @@ class expression_literal : public expression
     expression::type_t _type;
 };
 
-UHD_INLINE std::ostream& operator<< (std::ostream& out, const expression_literal &l)
+UHD_INLINE std::ostream& operator<<(std::ostream& out, const expression_literal& l)
 {
     out << l.repr();
     return out;
 }
 
-UHD_INLINE std::ostream& operator<< (std::ostream& out, const expression_literal::sptr &l)
+UHD_INLINE std::ostream& operator<<(std::ostream& out, const expression_literal::sptr& l)
 {
     out << l->repr();
     return out;
@@ -198,7 +182,7 @@ UHD_INLINE std::ostream& operator<< (std::ostream& out, const expression_literal
  */
 class expression_container : public expression
 {
-  public:
+public:
     typedef boost::shared_ptr<expression_container> sptr;
     typedef std::vector<expression::sptr> expr_list_type;
 
@@ -206,15 +190,11 @@ class expression_container : public expression
     static sptr make();
 
     //! List of valid combination types (see expression_container::eval()).
-    enum combiner_type {
-        COMBINE_ALL,
-        COMBINE_AND,
-        COMBINE_OR,
-        COMBINE_NOTSET
-    };
+    enum combiner_type { COMBINE_ALL, COMBINE_AND, COMBINE_OR, COMBINE_NOTSET };
 
     //! Create an empty container
-    expression_container() : _combiner(COMBINE_NOTSET) {};
+    expression_container() : _combiner(COMBINE_NOTSET){};
+    virtual ~expression_container() {}
 
     /*! Type-deduction rules for containers are:
      * - If the combination type is COMBINE_ALL or COMBINE_AND,
@@ -232,9 +212,15 @@ class expression_container : public expression
 
     void set_combiner_safe(const combiner_type c);
 
-    void set_combiner(const combiner_type c) { _combiner = c; };
+    void set_combiner(const combiner_type c)
+    {
+        _combiner = c;
+    };
 
-    combiner_type get_combiner() const { return _combiner; };
+    combiner_type get_combiner() const
+    {
+        return _combiner;
+    };
 
     /*! Evaluate a container by evaluating its sub-expressions.
      *
@@ -253,7 +239,7 @@ class expression_container : public expression
      */
     virtual expression_literal eval();
 
-  protected:
+protected:
     //! Store all the sub-expressions, in order
     expr_list_type _sub_exprs;
     combiner_type _combiner;
@@ -283,22 +269,19 @@ class function_table;
  */
 class expression_function : public expression_container
 {
-  public:
+public:
     typedef boost::shared_ptr<expression_function> sptr;
     typedef std::vector<expression::type_t> argtype_list_type;
 
     //! Return an sptr to a function object without args
     static sptr make(
-            const std::string &name,
-            const boost::shared_ptr<function_table> func_table
-    );
+        const std::string& name, const boost::shared_ptr<function_table> func_table);
 
-    static std::string to_string(const std::string &name, const argtype_list_type &types);
+    static std::string to_string(const std::string& name, const argtype_list_type& types);
 
     expression_function(
-            const std::string &name,
-            const boost::shared_ptr<function_table> func_table
-    );
+        const std::string& name, const boost::shared_ptr<function_table> func_table);
+    ~expression_function() {}
 
     //! Add an argument expression
     virtual void add(expression::sptr new_expr);
@@ -318,7 +301,7 @@ class expression_function : public expression_container
     //! String representation
     std::string repr() const;
 
-  private:
+private:
     std::string _name;
     const boost::shared_ptr<function_table> _func_table;
     std::vector<expression::type_t> _arg_types;
@@ -333,42 +316,40 @@ class expression_function : public expression_container
  */
 class expression_variable : public expression
 {
-  public:
+public:
     typedef boost::shared_ptr<expression_variable> sptr;
-    typedef boost::function<expression::type_t(const std::string &)> type_getter_type;
-    typedef boost::function<expression_literal(const std::string &)> value_getter_type;
+    typedef boost::function<expression::type_t(const std::string&)> type_getter_type;
+    typedef boost::function<expression_literal(const std::string&)> value_getter_type;
 
-    static sptr make(
-            const std::string &token_val,
-            type_getter_type type_getter,
-            value_getter_type value_getter
-    );
+    static sptr make(const std::string& token_val,
+        type_getter_type type_getter,
+        value_getter_type value_getter);
 
     /*! Create a variable object from its token value
      *  (e.g. '$spp', i.e. including the '$' symbol). The variable
      *  does not have to exist at this point.
      */
-    expression_variable(
-            const std::string &token_val,
-            type_getter_type type_getter,
-            value_getter_type value_getter
-    );
+    expression_variable(const std::string& token_val,
+        type_getter_type type_getter,
+        value_getter_type value_getter);
+
+    virtual ~expression_variable() {}
 
     /*! Looks up the variable type in the variable table.
      *
-     * \throws Depending on \p type_getter, this may throw when the variable does not exist.
-     *         Recommended behaviour is to throw uhd::syntax_error.
+     * \throws Depending on \p type_getter, this may throw when the variable does not
+     * exist. Recommended behaviour is to throw uhd::syntax_error.
      */
     expression::type_t infer_type() const;
 
     /*! Look up a variable's value in the variable table.
      *
-     * \throws Depending on \p value_getter, this may throw when the variable does not exist.
-     *         Recommended behaviour is to throw uhd::syntax_error.
+     * \throws Depending on \p value_getter, this may throw when the variable does not
+     * exist. Recommended behaviour is to throw uhd::syntax_error.
      */
     expression_literal eval();
 
-  private:
+private:
     std::string _varname;
     type_getter_type _type_getter;
     value_getter_type _value_getter;
@@ -377,4 +358,3 @@ class expression_variable : public expression
 }}} /* namespace uhd::rfnoc::nocscript */
 
 #endif /* INCLUDED_LIBUHD_RFNOC_NOCSCRIPT_EXPR_HPP */
-// vim: sw=4 et:

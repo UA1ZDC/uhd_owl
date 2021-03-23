@@ -1,18 +1,8 @@
 //
 // Copyright 2011-2014 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 
@@ -39,9 +29,9 @@ sbx_xcvr::sbx_version4::~sbx_version4(void){
     /* NOP */
 }
 
-void sbx_xcvr::sbx_version4::write_lo_regs(dboard_iface::unit_t unit, const std::vector<boost::uint32_t> &regs)
+void sbx_xcvr::sbx_version4::write_lo_regs(dboard_iface::unit_t unit, const std::vector<uint32_t> &regs)
 {
-    BOOST_FOREACH(boost::uint32_t reg, regs)
+    for(uint32_t reg:  regs)
     {
         self_base->get_iface()->write_spi(unit, spi_config_t::EDGE_RISE, reg, 32);
     }
@@ -52,9 +42,9 @@ void sbx_xcvr::sbx_version4::write_lo_regs(dboard_iface::unit_t unit, const std:
  * Tuning
  **********************************************************************/
 double sbx_xcvr::sbx_version4::set_lo_freq(dboard_iface::unit_t unit, double target_freq) {
-    UHD_LOGV(often) << boost::format(
+    UHD_LOGGER_TRACE("SBX") << boost::format(
         "SBX tune: target frequency %f MHz"
-    ) % (target_freq/1e6) << std::endl;
+    ) % (target_freq/1e6) ;
 
     /*
      * If the user sets 'mode_n=integer' in the tuning args, the user wishes to

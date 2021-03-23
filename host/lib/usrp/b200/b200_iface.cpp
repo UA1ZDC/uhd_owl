@@ -1,38 +1,30 @@
 //
 // Copyright 2012-2013 Ettus Research LLC
+// Copyright 2018-2019 Ettus Research, a National Instruments Brand
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include "b200_iface.hpp"
 
-#include "../../utils/ihex.hpp"
 #include <uhd/config.hpp>
-#include <uhd/utils/msg.hpp>
 #include <uhd/utils/log.hpp>
 #include <uhd/exception.hpp>
+#include <uhdlib/utils/ihex.hpp>
+
 #include <boost/functional/hash.hpp>
-#include <boost/thread/thread.hpp>
-#include <boost/cstdint.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/format.hpp>
+#include <boost/filesystem.hpp>
+#include <libusb.h>
 #include <fstream>
 #include <string>
 #include <vector>
 #include <cstring>
 #include <iomanip>
-#include <libusb.h>
+#include <chrono>
+#include <thread>
+#include <stdint.h>
 
 //! libusb_error_name is only in newer API
 #ifndef HAVE_LIBUSB_ERROR_NAME
@@ -45,42 +37,46 @@ using namespace uhd::transport;
 
 static const bool load_img_msg = true;
 
-const static boost::uint8_t FX3_FIRMWARE_LOAD = 0xA0;
-const static boost::uint8_t VRT_VENDOR_OUT = (LIBUSB_REQUEST_TYPE_VENDOR
-                                              | LIBUSB_ENDPOINT_OUT);
-const static boost::uint8_t VRT_VENDOR_IN = (LIBUSB_REQUEST_TYPE_VENDOR
-                                             | LIBUSB_ENDPOINT_IN);
-const static boost::uint8_t B200_VREQ_FPGA_START = 0x02;
-const static boost::uint8_t B200_VREQ_FPGA_DATA = 0x12;
-const static boost::uint8_t B200_VREQ_GET_COMPAT = 0x15;
-const static boost::uint8_t B200_VREQ_SET_FPGA_HASH = 0x1C;
-const static boost::uint8_t B200_VREQ_GET_FPGA_HASH = 0x1D;
-const static boost::uint8_t B200_VREQ_SET_FW_HASH = 0x1E;
-const static boost::uint8_t B200_VREQ_GET_FW_HASH = 0x1F;
-const static boost::uint8_t B200_VREQ_LOOP = 0x22;
-const static boost::uint8_t B200_VREQ_FPGA_CONFIG = 0x55;
-const static boost::uint8_t B200_VREQ_FPGA_RESET = 0x62;
-const static boost::uint8_t B200_VREQ_GPIF_RESET = 0x72;
-const static boost::uint8_t B200_VREQ_GET_USB = 0x80;
-const static boost::uint8_t B200_VREQ_GET_STATUS = 0x83;
-const static boost::uint8_t B200_VREQ_FX3_RESET = 0x99;
-const static boost::uint8_t B200_VREQ_EEPROM_WRITE = 0xBA;
-const static boost::uint8_t B200_VREQ_EEPROM_READ = 0xBB;
+const static uint8_t FX3_FIRMWARE_LOAD = 0xA0;
 
-const static boost::uint8_t FX3_STATE_UNDEFINED = 0x00;
-const static boost::uint8_t FX3_STATE_FPGA_READY = 0x01;
-const static boost::uint8_t FX3_STATE_CONFIGURING_FPGA = 0x02;
-const static boost::uint8_t FX3_STATE_BUSY = 0x03;
-const static boost::uint8_t FX3_STATE_RUNNING = 0x04;
-const static boost::uint8_t FX3_STATE_UNCONFIGURED = 0x05;
-const static boost::uint8_t FX3_STATE_ERROR = 0x06;
+// 32 KB - 256 bytes for EEPROM storage
+constexpr size_t BOOTLOADER_MAX_SIZE = 32512;
+
+const static uint8_t VRT_VENDOR_OUT = (LIBUSB_REQUEST_TYPE_VENDOR
+                                              | LIBUSB_ENDPOINT_OUT);
+const static uint8_t VRT_VENDOR_IN = (LIBUSB_REQUEST_TYPE_VENDOR
+                                             | LIBUSB_ENDPOINT_IN);
+const static uint8_t B200_VREQ_FPGA_START = 0x02;
+const static uint8_t B200_VREQ_FPGA_DATA = 0x12;
+const static uint8_t B200_VREQ_GET_COMPAT = 0x15;
+const static uint8_t B200_VREQ_SET_FPGA_HASH = 0x1C;
+const static uint8_t B200_VREQ_GET_FPGA_HASH = 0x1D;
+const static uint8_t B200_VREQ_SET_FW_HASH = 0x1E;
+const static uint8_t B200_VREQ_GET_FW_HASH = 0x1F;
+const static uint8_t B200_VREQ_LOOP = 0x22;
+const static uint8_t B200_VREQ_FPGA_CONFIG = 0x55;
+//const static uint8_t B200_VREQ_FPGA_RESET = 0x62;
+const static uint8_t B200_VREQ_GPIF_RESET = 0x72;
+const static uint8_t B200_VREQ_GET_USB = 0x80;
+const static uint8_t B200_VREQ_GET_STATUS = 0x83;
+const static uint8_t B200_VREQ_FX3_RESET = 0x99;
+const static uint8_t B200_VREQ_EEPROM_WRITE = 0xBA;
+const static uint8_t B200_VREQ_EEPROM_READ = 0xBB;
+
+const static uint8_t FX3_STATE_UNDEFINED = 0x00;
+const static uint8_t FX3_STATE_FPGA_READY = 0x01;
+const static uint8_t FX3_STATE_CONFIGURING_FPGA = 0x02;
+const static uint8_t FX3_STATE_BUSY = 0x03;
+const static uint8_t FX3_STATE_RUNNING = 0x04;
+const static uint8_t FX3_STATE_UNCONFIGURED = 0x05;
+const static uint8_t FX3_STATE_ERROR = 0x06;
 
 const static int VREQ_MAX_SIZE_USB2 = 64;
 const static int VREQ_MAX_SIZE_USB3 = 512;
 const static int VREQ_DEFAULT_SIZE  = VREQ_MAX_SIZE_USB2;
 const static int VREQ_MAX_SIZE      = VREQ_MAX_SIZE_USB3;
 
-typedef boost::uint32_t hash_type;
+typedef uint32_t hash_type;
 
 
 /***********************************************************************
@@ -137,12 +133,12 @@ public:
         //NOP
     }
 
-    int fx3_control_write(boost::uint8_t request,
-                           boost::uint16_t value,
-                           boost::uint16_t index,
+    int fx3_control_write(uint8_t request,
+                           uint16_t value,
+                           uint16_t index,
                            unsigned char *buff,
-                           boost::uint16_t length,
-                           boost::uint32_t timeout = 0) {
+                           uint16_t length,
+                           uint32_t timeout = 0) {
         return _usb_ctrl->submit(VRT_VENDOR_OUT,        // bmReqeustType
                                    request,             // bRequest
                                    value,               // wValue
@@ -152,12 +148,12 @@ public:
                                    timeout);            // timeout
     }
 
-    int fx3_control_read(boost::uint8_t request,
-                           boost::uint16_t value,
-                           boost::uint16_t index,
+    int fx3_control_read(uint8_t request,
+                           uint16_t value,
+                           uint16_t index,
                            unsigned char *buff,
-                           boost::uint16_t length,
-                           boost::uint32_t timeout = 0) {
+                           uint16_t length,
+                           uint32_t timeout = 0) {
         return _usb_ctrl->submit(VRT_VENDOR_IN,         // bmReqeustType
                                    request,             // bRequest
                                    value,               // wValue
@@ -167,21 +163,21 @@ public:
                                    timeout);            // timeout
     }
 
-    void write_i2c(UHD_UNUSED(boost::uint16_t addr), UHD_UNUSED(const byte_vector_t &bytes))
+    void write_i2c(UHD_UNUSED(uint16_t addr), UHD_UNUSED(const byte_vector_t &bytes))
     {
         throw uhd::not_implemented_error("b200 write i2c");
     }
 
 
-    byte_vector_t read_i2c(UHD_UNUSED(boost::uint16_t addr), UHD_UNUSED(size_t num_bytes))
+    byte_vector_t read_i2c(UHD_UNUSED(uint16_t addr), UHD_UNUSED(size_t num_bytes))
     {
         throw uhd::not_implemented_error("b200 read i2c");
     }
 
-    void write_eeprom(boost::uint16_t addr, boost::uint16_t offset,
+    void write_eeprom(uint16_t addr, uint16_t offset,
             const byte_vector_t &bytes) {
         int ret = fx3_control_write(B200_VREQ_EEPROM_WRITE,
-                          0, offset | (boost::uint16_t(addr) << 8),
+                          0, offset | (uint16_t(addr) << 8),
                           (unsigned char *) &bytes[0],
                           bytes.size());
 
@@ -192,12 +188,12 @@ public:
     }
 
     byte_vector_t read_eeprom(
-        boost::uint16_t addr,
-        boost::uint16_t offset,
+        uint16_t addr,
+        uint16_t offset,
         size_t num_bytes) {
         byte_vector_t recv_bytes(num_bytes);
         int bytes_read = fx3_control_read(B200_VREQ_EEPROM_READ,
-                         0, offset | (boost::uint16_t(addr) << 8),
+                         0, offset | (uint16_t(addr) << 8),
                          (unsigned char*) &recv_bytes[0],
                          num_bytes);
 
@@ -211,9 +207,10 @@ public:
 
     void load_firmware(const std::string filestring, UHD_UNUSED(bool force) = false)
     {
-        if (load_img_msg)
-            UHD_MSG(status) << "Loading firmware image: "
-                            << filestring << "..." << std::flush;
+        if (load_img_msg) {
+            UHD_LOGGER_INFO("B200") << "Loading firmware image: "
+                            << filestring << "...";
+        }
 
         ihex_reader file_reader(filestring);
         try {
@@ -227,7 +224,6 @@ public:
             throw uhd::io_error(str(boost::format("Could not load firmware: \n%s") % e.what()));
         }
 
-        UHD_MSG(status) << std::endl;
 
         //TODO
         //usrp_set_firmware_hash(hash); //set hash before reset
@@ -235,7 +231,7 @@ public:
         /* Success! Let the system settle. */
         // TODO: Replace this with a polling loop in the FX3, or find out
         // what the actual, correct timeout value is.
-        boost::this_thread::sleep(boost::posix_time::milliseconds(1000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
 
     void reset_fx3(void) {
@@ -281,7 +277,7 @@ public:
         */
     }
 
-    boost::uint8_t get_usb_speed(void) {
+    uint8_t get_usb_speed(void) {
 
         unsigned char rx_data[1];
         memset(rx_data, 0x00, sizeof(rx_data));
@@ -293,10 +289,10 @@ public:
         else if (ret != bytes_to_recv)
             throw uhd::io_error((boost::format("Short read on get USB speed (expecting: %d, returned: %d)") % bytes_to_recv % ret).str());
 
-        return boost::lexical_cast<boost::uint8_t>(rx_data[0]);
+        return boost::lexical_cast<uint8_t>(rx_data[0]);
     }
 
-    boost::uint8_t get_fx3_status(void) {
+    uint8_t get_fx3_status(void) {
 
         unsigned char rx_data[1];
         memset(rx_data, 0x00, sizeof(rx_data));
@@ -308,10 +304,10 @@ public:
         else if (ret != bytes_to_recv)
             throw uhd::io_error((boost::format("Short read on get FX3 status (expecting: %d, returned: %d)") % bytes_to_recv % ret).str());
 
-        return boost::lexical_cast<boost::uint8_t>(rx_data[0]);
+        return boost::lexical_cast<uint8_t>(rx_data[0]);
     }
 
-    boost::uint16_t get_compat_num(void) {
+    uint16_t get_compat_num(void) {
 
         unsigned char rx_data[2];
         memset(rx_data, 0x00, sizeof(rx_data));
@@ -374,10 +370,33 @@ public:
             throw uhd::io_error((boost::format("Short write on set FPGA hash (expecting: %d, returned: %d)") % bytes_to_send % ret).str());
     }
 
-    boost::uint32_t load_fpga(const std::string filestring, bool force) {
+    // Establish default largest possible control request transfer size based on operating 
+    // USB speed
+    int _get_transfer_size()
+    {
+        switch (get_usb_speed())
+        {
+            case 2:
+                return VREQ_DEFAULT_SIZE;
+            case 3:
+                return VREQ_MAX_SIZE_USB3;
+            default:
+                throw uhd::io_error(
+                    "load_fpga: get_usb_speed returned invalid USB speed (not 2 or 3).");
+        }
+    }
 
-        boost::uint8_t fx3_state = 0;
-        boost::uint32_t wait_count;
+    size_t _get_file_size(const char * filename)
+    {
+        boost::filesystem::path path(filename);
+        auto filesize = boost::filesystem::file_size(path);
+        return static_cast<size_t>(filesize);
+    }
+
+    uint32_t load_fpga(const std::string filestring, bool force) {
+
+        uint8_t fx3_state = 0;
+        uint32_t wait_count;
         int ret = 0;
         int bytes_to_xfer = 0;
 
@@ -387,33 +406,20 @@ public:
         hash_type loaded_hash; usrp_get_fpga_hash(loaded_hash);
         if (hash == loaded_hash and !force) return 0;
 
-        // Establish default largest possible control request transfer size based on operating USB speed
-        int transfer_size = VREQ_DEFAULT_SIZE;
-        int current_usb_speed = get_usb_speed();
-        if (current_usb_speed == 3)
-            transfer_size = VREQ_MAX_SIZE_USB3;
-        else if (current_usb_speed != 2)
-            throw uhd::io_error("load_fpga: get_usb_speed returned invalid USB speed (not 2 or 3).");
+        const int transfer_size = _get_transfer_size();
 
         UHD_ASSERT_THROW(transfer_size <= VREQ_MAX_SIZE);
 
         unsigned char out_buff[VREQ_MAX_SIZE];
 
         // Request loopback read, which will indicate the firmware's current control request buffer size
-        // Make sure that if operating as USB2, requested length is within spec
-        int ntoread = std::min(transfer_size, (int)sizeof(out_buff));
-        int nread = fx3_control_read(B200_VREQ_LOOP, 0, 0, out_buff, ntoread, 1000);
+        int nread = fx3_control_read(B200_VREQ_LOOP, 0, 0, out_buff, transfer_size, 1000);
         if (nread < 0)
             throw uhd::io_error((boost::format("load_fpga: unable to complete firmware loopback request (%d: %s)") % nread % libusb_error_name(nread)).str());
-        else if (nread != ntoread)
-            throw uhd::io_error((boost::format("load_fpga: short read on firmware loopback request (expecting: %d, returned: %d)") % ntoread % nread).str());
-        transfer_size = std::min(transfer_size, nread); // Select the smaller value
+        else if (nread != transfer_size)
+            throw uhd::io_error((boost::format("load_fpga: short read on firmware loopback request (expecting: %d, returned: %d)") % transfer_size % nread).str());
 
-        size_t file_size = 0;
-        {
-            std::ifstream file(filename, std::ios::in | std::ios::binary | std::ios::ate);
-            file_size = size_t(file.tellg());
-        }
+        const size_t file_size = _get_file_size(filename);
 
         std::ifstream file;
         file.open(filename, std::ios::in | std::ios::binary);
@@ -441,13 +447,15 @@ public:
                 return fx3_state;
             }
 
-            boost::this_thread::sleep(boost::posix_time::milliseconds(10));
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
             wait_count++;
         } while(fx3_state != FX3_STATE_FPGA_READY);
 
-        if (load_img_msg) UHD_MSG(status) << "Loading FPGA image: " \
-            << filestring << "..." << std::flush;
+        if (load_img_msg) {
+            UHD_LOGGER_INFO("B200") << "Loading FPGA image: "
+                                    << filestring << "...";
+        }
 
         bytes_to_xfer = 1;
         ret = fx3_control_write(B200_VREQ_FPGA_START, 0, 0, out_buff, bytes_to_xfer, 1000);
@@ -464,7 +472,7 @@ public:
                 return fx3_state;
             }
 
-            boost::this_thread::sleep(boost::posix_time::milliseconds(10));
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
             wait_count++;
         } while(fx3_state != FX3_STATE_CONFIGURING_FPGA);
@@ -476,7 +484,7 @@ public:
             if(n == 0)
                 continue;
 
-            boost::uint16_t transfer_count = boost::uint16_t(n);
+            uint16_t transfer_count = uint16_t(n);
 
             /* Send the data to the device. */
             int nwritten = fx3_control_write(B200_VREQ_FPGA_DATA, 0, 0, out_buff, transfer_count, 5000);
@@ -485,15 +493,21 @@ public:
             else if (nwritten != transfer_count)
                 throw uhd::io_error((boost::format("load_fpga: short write while transferring bitstream to FX3  (expecting: %d, returned: %d)") % transfer_count % nwritten).str());
 
+            const size_t LOG_GRANULARITY = 10; // %. Keep this an integer divisor of 100.
             if (load_img_msg)
             {
-                if (bytes_sent == 0) UHD_MSG(status) << "  0%" << std::flush;
-                const size_t percent_before = size_t((bytes_sent*100)/file_size);
+                if (bytes_sent == 0) UHD_LOGGER_DEBUG("B200") << "FPGA load:   0%" << std::flush;
+                const size_t percent_before =
+                    size_t((bytes_sent*100)/file_size) -
+                    (size_t((bytes_sent*100)/file_size) % LOG_GRANULARITY);
                 bytes_sent += transfer_count;
-                const size_t percent_after = size_t((bytes_sent*100)/file_size);
+                const size_t percent_after =
+                    size_t((bytes_sent*100)/file_size) -
+                    (size_t((bytes_sent*100)/file_size) % LOG_GRANULARITY);
                 if (percent_before != percent_after)
                 {
-                    UHD_MSG(status) << "\b\b\b\b" << std::setw(3) << percent_after << "%" << std::flush;
+                    UHD_LOGGER_DEBUG("B200")
+                        << "FPGA load: " << std::setw(3) << percent_after << "%";
                 }
             }
         }
@@ -508,15 +522,128 @@ public:
                 return fx3_state;
             }
 
-            boost::this_thread::sleep(boost::posix_time::milliseconds(10));
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
             wait_count++;
         } while(fx3_state != FX3_STATE_RUNNING);
 
         usrp_set_fpga_hash(hash);
 
-        if (load_img_msg)
-            UHD_MSG(status) << "\b\b\b\b done" << std::endl;
+        if (load_img_msg) {
+            UHD_LOGGER_DEBUG("B200") << "FPGA image loaded!";
+        }
+
+        return 0;
+    }
+
+    uint32_t load_bootloader(const std::string filestring)
+    {
+        // open bootloader file
+        const char* filename = filestring.c_str();
+
+        const size_t file_size = _get_file_size(filename);
+
+        if (file_size > BOOTLOADER_MAX_SIZE) {
+            throw uhd::runtime_error(
+                (boost::format("Bootloader img file is too large for EEPROM! (expecting: "
+                               "less than %d actual: %d")
+                    % BOOTLOADER_MAX_SIZE % file_size)
+                    .str());
+        }
+        std::ifstream file;
+        file.open(filename, std::ios::in | std::ios::binary);
+
+        if (!file.good()) {
+            throw uhd::io_error("load_bootloader: cannot open bootloader input file.");
+        }
+
+        // allocate buffer
+        const int transfer_size = _get_transfer_size();
+        UHD_ASSERT_THROW(transfer_size <= VREQ_MAX_SIZE);
+        std::vector<uint8_t> out_buff(transfer_size);
+
+        // Request loopback read, which will indicate the firmware's current control
+        // request buffer size
+        int nread =
+            fx3_control_read(B200_VREQ_LOOP, 0, 0, out_buff.data(), transfer_size, 1000);
+        if (nread < 0) {
+            throw uhd::io_error((boost::format("load_bootloader: unable to complete "
+                                               "firmware loopback request (%d: %s)")
+                                 % nread % libusb_error_name(nread))
+                                    .str());
+        } else if (nread != transfer_size) {
+            throw uhd::io_error(
+                (boost::format("load_bootloader: short read on firmware loopback request "
+                               "(expecting: %d, returned: %d)")
+                    % transfer_size % nread)
+                    .str());
+        }
+        // ensure FX3 is in non-error state
+        {
+            uint8_t fx3_state = get_fx3_status();
+
+            if (fx3_state == FX3_STATE_ERROR or fx3_state == FX3_STATE_UNDEFINED) {
+                return fx3_state;
+            }
+        }
+
+        UHD_LOGGER_INFO("B200") << "Loading bootloader image: " << filestring << "...";
+
+        size_t bytes_sent = 0;
+        while (!file.eof()) {
+            file.read((char*)&out_buff[0], transfer_size);
+            const std::streamsize n = file.gcount();
+            if (n == 0)
+                continue;
+
+            uint16_t transfer_count = uint16_t(n);
+
+            // Send the data to the device
+            int nwritten = fx3_control_write(
+                B200_VREQ_EEPROM_WRITE, 0, bytes_sent, out_buff.data(), transfer_count, 5000);
+            if (nwritten < 0) {
+                throw uhd::io_error(
+                    (boost::format(
+                         "load_bootloader: cannot write bitstream to FX3 (%d: %s)")
+                        % nwritten % libusb_error_name(nwritten))
+                        .str());
+            } else if (nwritten != transfer_count) {
+                throw uhd::io_error(
+                    (boost::format(
+                         "load_bootloader: short write while transferring bitstream "
+                         "to FX3  (expecting: %d, returned: %d)")
+                        % transfer_count % nwritten)
+                        .str());
+            }
+
+            const size_t LOG_GRANULARITY = 10; // %. Keep this an integer divisor of 100.
+
+            if (bytes_sent == 0)
+                UHD_LOGGER_DEBUG("B200") << "Bootloader load:   0%" << std::flush;
+            const size_t percent_before =
+                size_t((bytes_sent * 100) / file_size)
+                - (size_t((bytes_sent * 100) / file_size) % LOG_GRANULARITY);
+            bytes_sent += transfer_count;
+            const size_t percent_after =
+                size_t((bytes_sent * 100) / file_size)
+                - (size_t((bytes_sent * 100) / file_size) % LOG_GRANULARITY);
+            if (percent_before != percent_after) {
+                UHD_LOGGER_DEBUG("B200") << "Bootloader load: " << std::setw(3) << percent_after << "%";
+            }
+        }
+
+        file.close();
+
+        // ensure FX3 is in non-error state
+        {
+            uint8_t fx3_state = get_fx3_status();
+
+            if (fx3_state == FX3_STATE_ERROR or fx3_state == FX3_STATE_UNDEFINED) {
+                return fx3_state;
+            }
+        }
+
+        UHD_LOGGER_DEBUG("B200") << "Bootloader image loaded!";
 
         return 0;
     }
@@ -526,7 +653,7 @@ private:
 };
 
 
-std::string b200_iface::fx3_state_string(boost::uint8_t state)
+std::string b200_iface::fx3_state_string(uint8_t state)
 {
     switch (state)
     {

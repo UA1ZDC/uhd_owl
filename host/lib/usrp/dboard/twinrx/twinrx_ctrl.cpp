@@ -1,72 +1,66 @@
 //
-// Copyright 2015 Ettus Research LLC
+// Copyright 2015-2017 Ettus Research, A National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-#include <boost/thread/thread.hpp>
+#include "twinrx_ctrl.hpp"
+#include "twinrx_ids.hpp"
+#include <uhdlib/usrp/common/adf435x.hpp>
+#include <uhdlib/usrp/common/adf535x.hpp>
 #include <uhd/utils/math.hpp>
 #include <uhd/utils/safe_call.hpp>
-#include "twinrx_ctrl.hpp"
-#include "adf435x.hpp"
-#include "adf5355.hpp"
+#include <chrono>
+#include <thread>
 
 using namespace uhd;
 using namespace usrp;
 using namespace dboard::twinrx;
-typedef twinrx_cpld_regmap rm;
 
-static boost::uint32_t bool2bin(bool x) { return x ? 1 : 0; }
+namespace {
+  typedef twinrx_cpld_regmap rm;
 
-static const double TWINRX_DESIRED_REFERENCE_FREQ = 50e6;
+  typedef enum { LO1, LO2 } lo_t;
+
+  inline uint32_t bool2bin(bool x) { return x ? 1 : 0; }
+
+  const double TWINRX_DESIRED_REFERENCE_FREQ = 50e6;
+  const double TWINRX_REV_AB_PFD_FREQ = 6.25e6;
+  const double TWINRX_REV_C_PFD_FREQ = 12.5e6;
+  const double TWINRX_SPI_CLOCK_FREQ = 3e6;
+}
 
 class twinrx_ctrl_impl : public twinrx_ctrl {
 public:
     twinrx_ctrl_impl(
         dboard_iface::sptr db_iface,
         twinrx_gpio::sptr gpio_iface,
-        twinrx_cpld_regmap::sptr cpld_regmap
+        twinrx_cpld_regmap::sptr cpld_regmap,
+        const dboard_id_t rx_id
     ) : _db_iface(db_iface), _gpio_iface(gpio_iface), _cpld_regs(cpld_regmap)
     {
+        // SPI configuration
+        _spi_config.use_custom_divider = true;
+        _spi_config.divider = std::ceil(_db_iface->get_codec_rate(dboard_iface::UNIT_TX) / TWINRX_SPI_CLOCK_FREQ);
 
-        //Turn on switcher and wait for power good
-        _gpio_iface->set_field(twinrx_gpio::FIELD_SWPS_EN, 1);
-        size_t timeout_ms = 100;
-        while (_gpio_iface->get_field(twinrx_gpio::FIELD_SWPS_PWR_GOOD) == 0) {
-            boost::this_thread::sleep(boost::posix_time::microsec(1000));
-            if (--timeout_ms == 0) {
-                throw uhd::runtime_error("power supply failure");
-            }
+        //Initialize dboard clocks
+        bool found_rate = false;
+        for(double rate:  _db_iface->get_clock_rates(dboard_iface::UNIT_TX)) {
+            found_rate |= uhd::math::frequencies_are_equal(rate, TWINRX_DESIRED_REFERENCE_FREQ);
         }
-        //Initialize synthesizer objects
-        _lo1_iface[size_t(CH1)] = adf5355_iface::make(
-                boost::bind(&twinrx_ctrl_impl::_write_lo_spi, this, dboard_iface::UNIT_TX, _1));
-        _lo1_iface[size_t(CH2)] = adf5355_iface::make(
-                boost::bind(&twinrx_ctrl_impl::_write_lo_spi, this, dboard_iface::UNIT_TX, _1));
+        for(double rate:  _db_iface->get_clock_rates(dboard_iface::UNIT_RX)) {
+            found_rate |= uhd::math::frequencies_are_equal(rate, TWINRX_DESIRED_REFERENCE_FREQ);
+        }
+        if (not found_rate) {
+            throw uhd::runtime_error("TwinRX not supported on this motherboard");
+        }
+        _db_iface->set_clock_rate(dboard_iface::UNIT_TX, TWINRX_DESIRED_REFERENCE_FREQ);
+        _db_iface->set_clock_rate(dboard_iface::UNIT_RX, TWINRX_DESIRED_REFERENCE_FREQ);
 
-        _lo2_iface[size_t(CH1)] = adf435x_iface::make_adf4351(
-                boost::bind(&twinrx_ctrl_impl::_write_lo_spi, this, dboard_iface::UNIT_RX, _1));
-        _lo2_iface[size_t(CH2)] = adf435x_iface::make_adf4351(
-                boost::bind(&twinrx_ctrl_impl::_write_lo_spi, this, dboard_iface::UNIT_RX, _1));
+        _db_iface->set_clock_enabled(dboard_iface::UNIT_TX, true);
+        _db_iface->set_clock_enabled(dboard_iface::UNIT_RX, true);
 
-        // Assert synthesizer chip enables
-        _gpio_iface->set_field(twinrx_gpio::FIELD_LO1_CE_CH1, 1);
-        _gpio_iface->set_field(twinrx_gpio::FIELD_LO1_CE_CH2, 1);
-        _gpio_iface->set_field(twinrx_gpio::FIELD_LO2_CE_CH1, 1);
-        _gpio_iface->set_field(twinrx_gpio::FIELD_LO2_CE_CH2, 1);
-
-        //Initialize default state
+        //Initialize default switch and attenuator states
         set_chan_enabled(BOTH, false, false);
         set_preamp1(BOTH, PREAMP_BYPASS, false);
         set_preamp2(BOTH, false, false);
@@ -83,40 +77,67 @@ public:
         set_lo2_export_source(LO_EXPORT_DISABLED, false);
         set_antenna_mapping(ANTX_NATIVE, false);
         set_crossover_cal_mode(CAL_DISABLED, false);
-        commit();
+        _cpld_regs->flush();
 
-        //Initialize clocks and LO
-        bool found_rate = false;
-        BOOST_FOREACH(double rate, _db_iface->get_clock_rates(dboard_iface::UNIT_TX)) {
-            found_rate |= uhd::math::frequencies_are_equal(rate, TWINRX_DESIRED_REFERENCE_FREQ);
+        //Turn on power and wait for power good
+        _gpio_iface->set_field(twinrx_gpio::FIELD_SWPS_EN, 1);
+        size_t timeout_ms = 100;
+        while (_gpio_iface->get_field(twinrx_gpio::FIELD_SWPS_PWR_GOOD) == 0) {
+            std::this_thread::sleep_for(std::chrono::microseconds(1000));
+            if (--timeout_ms == 0) {
+                throw uhd::runtime_error("power supply failure");
+            }
         }
-        BOOST_FOREACH(double rate, _db_iface->get_clock_rates(dboard_iface::UNIT_RX)) {
-            found_rate |= uhd::math::frequencies_are_equal(rate, TWINRX_DESIRED_REFERENCE_FREQ);
-        }
-        if (not found_rate) {
-            throw uhd::runtime_error("TwinRX not supported on this motherboard");
-        }
-        _db_iface->set_clock_rate(dboard_iface::UNIT_TX, TWINRX_DESIRED_REFERENCE_FREQ);
-        _db_iface->set_clock_rate(dboard_iface::UNIT_RX, TWINRX_DESIRED_REFERENCE_FREQ);
 
-        _db_iface->set_clock_enabled(dboard_iface::UNIT_TX, true);
-        _db_iface->set_clock_enabled(dboard_iface::UNIT_RX, true);
+        // Assert synthesizer chip enables
+        _gpio_iface->set_field(twinrx_gpio::FIELD_LO1_CE_CH1, 1);
+        _gpio_iface->set_field(twinrx_gpio::FIELD_LO1_CE_CH2, 1);
+        _gpio_iface->set_field(twinrx_gpio::FIELD_LO2_CE_CH1, 1);
+        _gpio_iface->set_field(twinrx_gpio::FIELD_LO2_CE_CH2, 1);
+
+        //Initialize synthesizers
         for (size_t i = 0; i < NUM_CHANS; i++) {
-            _config_lo1_route(i==0?LO_CONFIG_CH1:LO_CONFIG_CH2);
-            _config_lo2_route(i==0?LO_CONFIG_CH1:LO_CONFIG_CH2);
-            _lo1_iface[i]->set_output_power(adf5355_iface::OUTPUT_POWER_5DBM);
+            // LO1
+            if (rx_id == twinrx::TWINRX_REV_C_ID) {
+                _lo1_iface[i] = adf535x_iface::make_adf5356(
+                    [this](const std::vector<uint32_t>& regs) {
+                        _write_lo_spi(dboard_iface::UNIT_TX, regs);
+                    },
+                    [this](uint32_t microseconds) {
+                        _db_iface->sleep(boost::chrono::microseconds(microseconds));
+                    }
+                );
+                _lo1_iface[i]->set_pfd_freq(TWINRX_REV_C_PFD_FREQ);
+            } else {
+                _lo1_iface[i] = adf535x_iface::make_adf5355(
+                    [this](const std::vector<uint32_t>& regs) {
+                        _write_lo_spi(dboard_iface::UNIT_TX, regs);
+                    },
+                    [this](uint32_t microseconds) {
+                        _db_iface->sleep(boost::chrono::microseconds(microseconds));
+                    }
+                );
+                _lo1_iface[i]->set_pfd_freq(TWINRX_REV_AB_PFD_FREQ);
+            }
+            _lo1_iface[i]->set_output_power(adf535x_iface::OUTPUT_POWER_5DBM);
             _lo1_iface[i]->set_reference_freq(TWINRX_DESIRED_REFERENCE_FREQ);
-            _lo1_iface[i]->set_muxout_mode(adf5355_iface::MUXOUT_DLD);
+            _lo1_iface[i]->set_muxout_mode(adf535x_iface::MUXOUT_DLD);
             _lo1_iface[i]->set_frequency(3e9, 1.0e3);
+
+            // LO2
+            _lo2_iface[i] = adf435x_iface::make_adf4351(
+                [this](const std::vector<uint32_t>& regs) {
+                    _write_lo_spi(dboard_iface::UNIT_RX, regs);
+                }
+            );
             _lo2_iface[i]->set_feedback_select(adf435x_iface::FB_SEL_DIVIDED);
             _lo2_iface[i]->set_output_power(adf435x_iface::OUTPUT_POWER_5DBM);
             _lo2_iface[i]->set_reference_freq(TWINRX_DESIRED_REFERENCE_FREQ);
             _lo2_iface[i]->set_muxout_mode(adf435x_iface::MUXOUT_DLD);
-            _lo1_iface[i]->commit();
-            _lo2_iface[i]->commit();
+            _lo2_iface[i]->set_tuning_mode(adf435x_iface::TUNING_MODE_LOW_SPUR);
+            _lo2_iface[i]->set_prescaler(adf435x_iface::PRESCALER_8_9);
         }
-        _config_lo1_route(LO_CONFIG_NONE);
-        _config_lo2_route(LO_CONFIG_NONE);
+        commit();
     }
 
     ~twinrx_ctrl_impl()
@@ -137,15 +158,17 @@ public:
     {
         boost::lock_guard<boost::mutex> lock(_mutex);
         if (ch == CH1 or ch == BOTH) {
-            _cpld_regs->rf1_reg1.set(rm::rf1_reg1_t::AMP_LO1_EN_CH1, bool2bin(enabled));
             _cpld_regs->if0_reg3.set(rm::if0_reg3_t::IF1_IF2_EN_CH1, bool2bin(enabled));
             _cpld_regs->if0_reg0.set(rm::if0_reg0_t::AMP_LO2_EN_CH1, bool2bin(enabled));
+            _chan_enabled[size_t(CH1)] = enabled;
         }
         if (ch == CH2 or ch == BOTH) {
             _cpld_regs->rf1_reg5.set(rm::rf1_reg5_t::AMP_LO1_EN_CH2, bool2bin(enabled));
             _cpld_regs->if0_reg4.set(rm::if0_reg4_t::IF1_IF2_EN_CH2, bool2bin(enabled));
             _cpld_regs->if0_reg0.set(rm::if0_reg0_t::AMP_LO2_EN_CH2, bool2bin(enabled));
+            _chan_enabled[size_t(CH2)] = enabled;
         }
+        _set_lo1_amp(_chan_enabled[size_t(CH1)], _chan_enabled[size_t(CH2)], _lo1_src[size_t(CH2)]);
         if (commit) _commit();
     }
 
@@ -224,7 +247,7 @@ public:
     void set_lb_preselector(channel_t ch, preselector_path_t path, bool commit = true)
     {
         boost::lock_guard<boost::mutex> lock(_mutex);
-        boost::uint32_t sw7val = 0, sw8val = 0;
+        uint32_t sw7val = 0, sw8val = 0;
         switch (path) {
             case PRESEL_PATH1: sw7val = 3; sw8val = 1; break;
             case PRESEL_PATH2: sw7val = 2; sw8val = 0; break;
@@ -246,7 +269,7 @@ public:
     void set_hb_preselector(channel_t ch, preselector_path_t path, bool commit = true)
     {
         boost::lock_guard<boost::mutex> lock(_mutex);
-        boost::uint32_t sw9ch1val = 0, sw10ch1val = 0, sw9ch2val = 0, sw10ch2val = 0;
+        uint32_t sw9ch1val = 0, sw10ch1val = 0, sw9ch2val = 0, sw10ch2val = 0;
         switch (path) {
             case PRESEL_PATH1: sw9ch1val = 3; sw10ch1val = 0; sw9ch2val = 0; sw10ch2val = 3; break;
             case PRESEL_PATH2: sw9ch1val = 1; sw10ch1val = 2; sw9ch2val = 1; sw10ch2val = 1; break;
@@ -266,7 +289,7 @@ public:
 
     }
 
-    void set_input_atten(channel_t ch, boost::uint8_t atten, bool commit = true)
+    void set_input_atten(channel_t ch, uint8_t atten, bool commit = true)
     {
         boost::lock_guard<boost::mutex> lock(_mutex);
         if (ch == CH1 or ch == BOTH) {
@@ -278,7 +301,7 @@ public:
         if (commit) _commit();
     }
 
-    void set_lb_atten(channel_t ch, boost::uint8_t atten, bool commit = true)
+    void set_lb_atten(channel_t ch, uint8_t atten, bool commit = true)
     {
         boost::lock_guard<boost::mutex> lock(_mutex);
         if (ch == CH1 or ch == BOTH) {
@@ -290,7 +313,7 @@ public:
         if (commit) _commit();
     }
 
-    void set_hb_atten(channel_t ch, boost::uint8_t atten, bool commit = true)
+    void set_hb_atten(channel_t ch, uint8_t atten, bool commit = true)
     {
         boost::lock_guard<boost::mutex> lock(_mutex);
         if (ch == CH1 or ch == BOTH) {
@@ -307,7 +330,7 @@ public:
         boost::lock_guard<boost::mutex> lock(_mutex);
         if (ch == CH1 or ch == BOTH) {
             _cpld_regs->rf1_reg5.set(rm::rf1_reg5_t::SW14_CTRL_CH2, bool2bin(source!=LO_COMPANION));
-            _cpld_regs->rf1_reg1.set(rm::rf1_reg1_t::SW15_CTRL_CH1, bool2bin(source==LO_EXTERNAL));
+            _cpld_regs->rf1_reg1.set(rm::rf1_reg1_t::SW15_CTRL_CH1, bool2bin(source==LO_EXTERNAL||source==LO_REIMPORT));
             _cpld_regs->rf1_reg1.set(rm::rf1_reg1_t::SW16_CTRL_CH1, bool2bin(source!=LO_INTERNAL));
             _lo1_src[size_t(CH1)] = source;
         }
@@ -316,6 +339,7 @@ public:
             _cpld_regs->rf1_reg5.set(rm::rf1_reg5_t::SW15_CTRL_CH2, bool2bin(source!=LO_INTERNAL));
             _cpld_regs->rf1_reg6.set(rm::rf1_reg6_t::SW16_CTRL_CH2, bool2bin(source==LO_INTERNAL));
             _lo1_src[size_t(CH2)] = source;
+            _set_lo1_amp(_chan_enabled[size_t(CH1)], _chan_enabled[size_t(CH2)], _lo1_src[size_t(CH2)]);
         }
         if (commit) _commit();
     }
@@ -330,7 +354,7 @@ public:
             _lo2_src[size_t(CH1)] = source;
         }
         if (ch == CH2 or ch == BOTH) {
-            _cpld_regs->if0_reg4.set(rm::if0_reg4_t::SW19_CTRL_CH1, bool2bin(source==LO_EXTERNAL));
+            _cpld_regs->if0_reg4.set(rm::if0_reg4_t::SW19_CTRL_CH1, bool2bin(source==LO_EXTERNAL||source==LO_REIMPORT));
             _cpld_regs->if0_reg0.set(rm::if0_reg0_t::SW20_CTRL_CH2, bool2bin(source==LO_INTERNAL||source==LO_DISABLED));
             _cpld_regs->if0_reg4.set(rm::if0_reg4_t::SW21_CTRL_CH2, bool2bin(source==LO_INTERNAL));
             _lo2_src[size_t(CH2)] = source;
@@ -427,24 +451,69 @@ public:
     double set_lo2_synth_freq(channel_t ch, double freq, bool commit = true)
     {
         boost::lock_guard<boost::mutex> lock(_mutex);
-        static const double PRESCALER_THRESH = 3.6e9;
 
         double coerced_freq = 0.0;
         if (ch == CH1 or ch == BOTH) {
-            _lo2_iface[size_t(CH1)]->set_prescaler(freq > PRESCALER_THRESH ?
-                adf435x_iface::PRESCALER_8_9 : adf435x_iface::PRESCALER_4_5);
             coerced_freq = _lo2_iface[size_t(CH1)]->set_frequency(freq, false, false);
             _lo2_freq[size_t(CH1)] = tune_freq_t(freq);
         }
         if (ch == CH2 or ch == BOTH) {
-            _lo2_iface[size_t(CH2)]->set_prescaler(freq > PRESCALER_THRESH ?
-                adf435x_iface::PRESCALER_8_9 : adf435x_iface::PRESCALER_4_5);
             coerced_freq = _lo2_iface[size_t(CH2)]->set_frequency(freq, false, false);
             _lo2_freq[size_t(CH2)] = tune_freq_t(freq);
         }
 
         if (commit) _commit();
         return coerced_freq;
+    }
+
+    double set_lo1_charge_pump(channel_t ch, double current, bool commit = true)
+    {
+        boost::lock_guard<boost::mutex> lock(_mutex);
+        double coerced_current = 0.0;
+        if (ch == CH1 or ch == BOTH) {
+            coerced_current =
+                _lo1_iface[size_t(CH1)]->set_charge_pump_current(current, false);
+        }
+        if (ch == CH2 or ch == BOTH) {
+            coerced_current =
+                _lo1_iface[size_t(CH2)]->set_charge_pump_current(current, false);
+        }
+
+        if (commit) {
+            _commit();
+        }
+        return coerced_current;
+    }
+
+    double set_lo2_charge_pump(channel_t ch, double current, bool commit = true)
+    {
+        boost::lock_guard<boost::mutex> lock(_mutex);
+        double coerced_current = 0.0;
+        if (ch == CH1 or ch == BOTH) {
+            coerced_current =
+                _lo2_iface[size_t(CH1)]->set_charge_pump_current(current, false);
+        }
+        if (ch == CH2 or ch == BOTH) {
+            coerced_current =
+                _lo2_iface[size_t(CH2)]->set_charge_pump_current(current, false);
+        }
+
+        if (commit) {
+            _commit();
+        }
+        return coerced_current;
+    }
+
+    uhd::meta_range_t get_lo1_charge_pump_range()
+    {
+        // assume that both channels have the same range
+        return _lo1_iface[size_t(CH1)]->get_charge_pump_current_range();
+    }
+
+    uhd::meta_range_t get_lo2_charge_pump_range()
+    {
+        // assume that both channels have the same range
+        return _lo2_iface[size_t(CH1)]->get_charge_pump_current_range();
     }
 
     bool read_lo1_locked(channel_t ch)
@@ -486,29 +555,29 @@ private:    //Functions
         _cpld_regs->rf1_reg7.set(rm::rf1_reg7_t::SW22_CTRL_CH2, bool2bin((lo1_export_src!=LO_CH2_SYNTH)||(cal_mode==CAL_CH2)));
     }
 
-    void _config_lo1_route(lo_config_route_t source)
+    void _set_lo1_amp(bool ch1_enabled, bool ch2_enabled, lo_source_t ch2_lo1_src)
     {
-        //Route SPI LEs through CPLD (will not assert them)
-        _cpld_regs->rf0_reg2.set(rm::rf0_reg2_t::LO1_LE_CH1, bool2bin(source==LO_CONFIG_CH1||source==LO_CONFIG_BOTH));
-        _cpld_regs->rf0_reg2.set(rm::rf0_reg2_t::LO1_LE_CH2, bool2bin(source==LO_CONFIG_CH2||source==LO_CONFIG_BOTH));
-        _cpld_regs->rf0_reg2.flush();
+        // AMP_LO1_EN_CH1 also controls the amp for the external LO1 port,
+        // which could be in use by ch2
+        _cpld_regs->rf1_reg1.set(rm::rf1_reg1_t::AMP_LO1_EN_CH1, bool2bin(
+            ch1_enabled || (ch2_enabled && (ch2_lo1_src == LO_EXTERNAL || ch2_lo1_src == LO_REIMPORT))));
     }
 
-    void _config_lo2_route(lo_config_route_t source)
+    void _config_lo_route(lo_t lo, channel_t channel)
     {
         //Route SPI LEs through CPLD (will not assert them)
-        _cpld_regs->if0_reg2.set(rm::if0_reg2_t::LO2_LE_CH1, bool2bin(source==LO_CONFIG_CH1||source==LO_CONFIG_BOTH));
-        _cpld_regs->if0_reg2.set(rm::if0_reg2_t::LO2_LE_CH2, bool2bin(source==LO_CONFIG_CH2||source==LO_CONFIG_BOTH));
+        _cpld_regs->rf0_reg2.set(rm::rf0_reg2_t::LO1_LE_CH1, bool2bin(lo == LO1 and (channel == CH1 or channel == BOTH)));
+        _cpld_regs->rf0_reg2.set(rm::rf0_reg2_t::LO1_LE_CH2, bool2bin(lo == LO1 and (channel == CH2 or channel == BOTH)));
+        _cpld_regs->rf0_reg2.flush();
+        _cpld_regs->if0_reg2.set(rm::if0_reg2_t::LO2_LE_CH1, bool2bin(lo == LO2 and (channel == CH1 or channel == BOTH)));
+        _cpld_regs->if0_reg2.set(rm::if0_reg2_t::LO2_LE_CH2, bool2bin(lo == LO2 and (channel == CH2 or channel == BOTH)));
         _cpld_regs->if0_reg2.flush();
     }
 
-    void _write_lo_spi(dboard_iface::unit_t unit, const std::vector<boost::uint32_t> &regs)
+    void _write_lo_spi(dboard_iface::unit_t unit, const std::vector<uint32_t> &regs)
     {
-        BOOST_FOREACH(boost::uint32_t reg, regs) {
-             spi_config_t spi_config = spi_config_t(spi_config_t::EDGE_RISE);
-             spi_config.use_custom_divider = true;
-             spi_config.divider = 67;
-            _db_iface->write_spi(unit, spi_config, reg, 32);
+        for(uint32_t reg:  regs) {
+            _db_iface->write_spi(unit, _spi_config, reg, 32);
         }
     }
 
@@ -533,8 +602,8 @@ private:    //Functions
                                    _lo2_src[size_t(CH1)] == LO_COMPANION ||
                                    _lo2_export == LO_CH2_SYNTH;
 
-        _lo1_iface[size_t(CH1)]->set_output_enable(adf5355_iface::RF_OUTPUT_A, _lo1_enable[size_t(CH1)].get());
-        _lo1_iface[size_t(CH2)]->set_output_enable(adf5355_iface::RF_OUTPUT_A, _lo1_enable[size_t(CH2)].get());
+        _lo1_iface[size_t(CH1)]->set_output_enable(adf535x_iface::RF_OUTPUT_A, _lo1_enable[size_t(CH1)].get());
+        _lo1_iface[size_t(CH2)]->set_output_enable(adf535x_iface::RF_OUTPUT_A, _lo1_enable[size_t(CH2)].get());
 
         _lo2_iface[size_t(CH1)]->set_output_enable(adf435x_iface::RF_OUTPUT_A, _lo2_enable[size_t(CH1)].get());
         _lo2_iface[size_t(CH2)]->set_output_enable(adf435x_iface::RF_OUTPUT_A, _lo2_enable[size_t(CH2)].get());
@@ -547,7 +616,7 @@ private:    //Functions
                                        _lo1_enable[size_t(CH1)].get() == _lo1_enable[size_t(CH2)].get();
 
         if (simultaneous_commit_lo1) {
-            _config_lo1_route(LO_CONFIG_BOTH);
+            _config_lo_route(LO1, BOTH);
             //Only commit one of the channels. The route LO_CONFIG_BOTH
             //will ensure that the LEs for both channels are enabled
             _lo1_iface[size_t(CH1)]->commit();
@@ -555,21 +624,18 @@ private:    //Functions
             _lo1_freq[size_t(CH2)].mark_clean();
             _lo1_enable[size_t(CH1)].mark_clean();
             _lo1_enable[size_t(CH2)].mark_clean();
-            _config_lo1_route(LO_CONFIG_NONE);
         } else {
             if (_lo1_freq[size_t(CH1)].is_dirty() || _lo1_enable[size_t(CH1)].is_dirty()) {
-                _config_lo1_route(LO_CONFIG_CH1);
+                _config_lo_route(LO1, CH1);
                 _lo1_iface[size_t(CH1)]->commit();
                 _lo1_freq[size_t(CH1)].mark_clean();
                 _lo1_enable[size_t(CH1)].mark_clean();
-                _config_lo1_route(LO_CONFIG_NONE);
             }
             if (_lo1_freq[size_t(CH2)].is_dirty() || _lo1_enable[size_t(CH2)].is_dirty()) {
-                _config_lo1_route(LO_CONFIG_CH2);
+                _config_lo_route(LO1, CH2);
                 _lo1_iface[size_t(CH2)]->commit();
                 _lo1_freq[size_t(CH2)].mark_clean();
                 _lo1_enable[size_t(CH2)].mark_clean();
-                _config_lo1_route(LO_CONFIG_NONE);
             }
         }
 
@@ -580,7 +646,7 @@ private:    //Functions
                                        _lo2_enable[size_t(CH1)].get() == _lo2_enable[size_t(CH2)].get();
 
         if (simultaneous_commit_lo2) {
-            _config_lo2_route(LO_CONFIG_BOTH);
+            _config_lo_route(LO2, BOTH);
             //Only commit one of the channels. The route LO_CONFIG_BOTH
             //will ensure that the LEs for both channels are enabled
             _lo2_iface[size_t(CH1)]->commit();
@@ -588,21 +654,18 @@ private:    //Functions
             _lo2_freq[size_t(CH2)].mark_clean();
             _lo2_enable[size_t(CH1)].mark_clean();
             _lo2_enable[size_t(CH2)].mark_clean();
-            _config_lo2_route(LO_CONFIG_NONE);
         } else {
             if (_lo2_freq[size_t(CH1)].is_dirty() || _lo2_enable[size_t(CH1)].is_dirty()) {
-                _config_lo2_route(LO_CONFIG_CH1);
+                _config_lo_route(LO2, CH1);
                 _lo2_iface[size_t(CH1)]->commit();
                 _lo2_freq[size_t(CH1)].mark_clean();
                 _lo2_enable[size_t(CH1)].mark_clean();
-                _config_lo2_route(LO_CONFIG_NONE);
             }
             if (_lo2_freq[size_t(CH2)].is_dirty() || _lo2_enable[size_t(CH2)].is_dirty()) {
-                _config_lo2_route(LO_CONFIG_CH2);
+                _config_lo_route(LO2, CH2);
                 _lo2_iface[size_t(CH2)]->commit();
                 _lo2_freq[size_t(CH2)].mark_clean();
                 _lo2_enable[size_t(CH2)].mark_clean();
-                _config_lo2_route(LO_CONFIG_NONE);
             }
         }
     }
@@ -622,7 +685,8 @@ private:    //Members
     dboard_iface::sptr          _db_iface;
     twinrx_gpio::sptr           _gpio_iface;
     twinrx_cpld_regmap::sptr    _cpld_regs;
-    adf5355_iface::sptr         _lo1_iface[NUM_CHANS];
+    spi_config_t                _spi_config;
+    adf535x_iface::sptr         _lo1_iface[NUM_CHANS];
     adf435x_iface::sptr         _lo2_iface[NUM_CHANS];
     lo_source_t                 _lo1_src[NUM_CHANS];
     lo_source_t                 _lo2_src[NUM_CHANS];
@@ -632,12 +696,14 @@ private:    //Members
     dirty_tracked<bool>         _lo2_enable[NUM_CHANS];
     lo_export_source_t          _lo1_export;
     lo_export_source_t          _lo2_export;
+    bool                        _chan_enabled[NUM_CHANS];
 };
 
 twinrx_ctrl::sptr twinrx_ctrl::make(
     dboard_iface::sptr db_iface,
     twinrx_gpio::sptr gpio_iface,
-    twinrx_cpld_regmap::sptr cpld_regmap
+    twinrx_cpld_regmap::sptr cpld_regmap,
+    const dboard_id_t rx_id
 ) {
-    return sptr(new twinrx_ctrl_impl(db_iface, gpio_iface, cpld_regmap));
+    return std::make_shared<twinrx_ctrl_impl>(db_iface, gpio_iface, cpld_regmap, rx_id);
 }

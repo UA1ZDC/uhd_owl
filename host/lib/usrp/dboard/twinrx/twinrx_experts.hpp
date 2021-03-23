@@ -1,25 +1,15 @@
 //
 // Copyright 2016 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #ifndef INCLUDED_DBOARD_TWINRX_EXPERTS_HPP
 #define INCLUDED_DBOARD_TWINRX_EXPERTS_HPP
 
 #include "twinrx_ctrl.hpp"
-#include "expert_nodes.hpp"
+#include <uhdlib/experts/expert_nodes.hpp>
 #include <uhd/utils/math.hpp>
 
 namespace uhd { namespace usrp { namespace dboard { namespace twinrx {
@@ -51,6 +41,38 @@ static const std::string lo_stage_str(lo_stage_t stage, bool lower = false) {
     std::string prefix = lower ? "lo" : "LO";
     return prefix + ((stage == STAGE_LO1) ? "1" : "2");
 }
+
+
+/*!---------------------------------------------------------
+ * twinrx_scheduling_expert
+ *
+ * This expert is responsible for scheduling time sensitive actions
+ * in other experts. It responds to changes in the command time and
+ * selectively causes experts to run in order to ensure a synchronized
+ * system.
+ *
+ * ---------------------------------------------------------
+ */
+class twinrx_scheduling_expert : public experts::worker_node_t {
+public:
+    twinrx_scheduling_expert(const experts::node_retriever_t& db, std::string ch)
+    : experts::worker_node_t(prepend_ch("twinrx_scheduling_expert", ch)),
+      _command_time     (db, prepend_ch("time/cmd", ch)),
+      _rx_frontend_time (db, prepend_ch("time/rx_frontend", ch))
+    {
+        bind_accessor(_command_time);
+        bind_accessor(_rx_frontend_time);
+    }
+
+private:
+    virtual void resolve();
+
+    //Inputs
+    experts::data_reader_t<time_spec_t>    _command_time;
+
+    //Outputs
+    experts::data_writer_t<time_spec_t>    _rx_frontend_time;
+};
 
 /*!---------------------------------------------------------
  * twinrx_freq_path_expert
@@ -271,6 +293,7 @@ public:
       _if_freq_d        (db, prepend_ch("if_freq/desired", ch)),
       _lo1_inj_side     (db, prepend_ch("ch/LO1/inj_side", ch)),
       _lo2_inj_side     (db, prepend_ch("ch/LO2/inj_side", ch)),
+      _rx_frontend_time (db, prepend_ch("time/rx_frontend", ch)),
       _if_freq_c        (db, prepend_ch("if_freq/coerced", ch)),
       _db_iface         (db_iface)
     {
@@ -280,6 +303,7 @@ public:
         bind_accessor(_lo1_inj_side);
         bind_accessor(_lo2_inj_side);
         bind_accessor(_if_freq_c);
+        bind_accessor(_rx_frontend_time);
     }
 
 private:
@@ -293,9 +317,14 @@ private:
     experts::data_reader_t<double>                          _if_freq_d;
     experts::data_reader_t<lo_inj_side_t>                   _lo1_inj_side;
     experts::data_reader_t<lo_inj_side_t>                   _lo2_inj_side;
+    experts::data_reader_t<time_spec_t>                     _rx_frontend_time;
+
     //Outputs
     experts::data_writer_t<double>                          _if_freq_c;
     dboard_iface::sptr                                      _db_iface;
+
+    //Misc
+    time_spec_t  _cached_cmd_time;
 };
 
 /*!---------------------------------------------------------
@@ -397,9 +426,9 @@ private:
     experts::data_reader_t<twinrx_ctrl::preselector_path_t> _hb_presel;
     experts::data_reader_t<twinrx_ctrl::antenna_mapping_t>  _ant_mapping;
     //Outputs
-    experts::data_writer_t<boost::uint8_t>                  _input_atten;
-    experts::data_writer_t<boost::uint8_t>                  _lb_atten;
-    experts::data_writer_t<boost::uint8_t>                  _hb_atten;
+    experts::data_writer_t<uint8_t>                  _input_atten;
+    experts::data_writer_t<uint8_t>                  _lb_atten;
+    experts::data_writer_t<uint8_t>                  _hb_atten;
     experts::data_writer_t<twinrx_ctrl::preamp_state_t>     _preamp1;
     experts::data_writer_t<bool>                            _preamp2;
 };
@@ -460,21 +489,21 @@ private:
 
     //Inputs
     experts::data_reader_t<twinrx_ctrl::antenna_mapping_t>  _ant_mapping;
-    experts::data_reader_t<boost::uint8_t>                  _ch0_input_atten;
+    experts::data_reader_t<uint8_t>                  _ch0_input_atten;
     experts::data_reader_t<twinrx_ctrl::preamp_state_t>     _ch0_preamp1;
     experts::data_reader_t<bool>                            _ch0_preamp2;
     experts::data_reader_t<bool>                            _ch0_lb_preamp_presel;
-    experts::data_reader_t<boost::uint8_t>                  _ch1_input_atten;
+    experts::data_reader_t<uint8_t>                  _ch1_input_atten;
     experts::data_reader_t<twinrx_ctrl::preamp_state_t>     _ch1_preamp1;
     experts::data_reader_t<bool>                            _ch1_preamp2;
     experts::data_reader_t<bool>                            _ch1_lb_preamp_presel;
 
     //Outputs
-    experts::data_writer_t<boost::uint8_t>                  _ant0_input_atten;
+    experts::data_writer_t<uint8_t>                  _ant0_input_atten;
     experts::data_writer_t<twinrx_ctrl::preamp_state_t>     _ant0_preamp1;
     experts::data_writer_t<bool>                            _ant0_preamp2;
     experts::data_writer_t<bool>                            _ant0_lb_preamp_presel;
-    experts::data_writer_t<boost::uint8_t>                  _ant1_input_atten;
+    experts::data_writer_t<uint8_t>                  _ant1_input_atten;
     experts::data_writer_t<twinrx_ctrl::preamp_state_t>     _ant1_preamp1;
     experts::data_writer_t<bool>                            _ant1_preamp2;
     experts::data_writer_t<bool>                            _ant1_lb_preamp_presel;
@@ -527,6 +556,10 @@ public:
             bind_accessor(ch.lo2_freq_d);
             bind_accessor(ch.lo1_freq_c);
             bind_accessor(ch.lo2_freq_c);
+            bind_accessor(ch.lo1_charge_pump_c);
+            bind_accessor(ch.lo2_charge_pump_c);
+            bind_accessor(ch.lo1_charge_pump_d);
+            bind_accessor(ch.lo2_charge_pump_d);
         }
         bind_accessor(_lo1_synth0_mapping);
         bind_accessor(_lo1_synth1_mapping);
@@ -558,22 +591,26 @@ private:
     class ch_settings {
     public:
         ch_settings(const experts::node_retriever_t& db, const std::string& ch) :
-            chan_enabled    (db, prepend_ch("enabled", ch)),
-            preamp1         (db, prepend_ch("ant/preamp1", ch)),
-            preamp2         (db, prepend_ch("ant/preamp2", ch)),
-            lb_preamp_presel(db, prepend_ch("ant/lb_preamp_presel", ch)),
-            signal_path     (db, prepend_ch("ch/signal_path", ch)),
-            lb_presel       (db, prepend_ch("ch/lb_presel", ch)),
-            hb_presel       (db, prepend_ch("ch/hb_presel", ch)),
-            input_atten     (db, prepend_ch("ant/input_atten", ch)),
-            lb_atten        (db, prepend_ch("ch/lb_atten", ch)),
-            hb_atten        (db, prepend_ch("ch/hb_atten", ch)),
-            lo1_source      (db, prepend_ch("ch/LO1/source", ch)),
-            lo2_source      (db, prepend_ch("ch/LO2/source", ch)),
-            lo1_freq_d      (db, prepend_ch("los/LO1/freq/desired", ch)),
-            lo2_freq_d      (db, prepend_ch("los/LO2/freq/desired", ch)),
-            lo1_freq_c      (db, prepend_ch("los/LO1/freq/coerced", ch)),
-            lo2_freq_c      (db, prepend_ch("los/LO2/freq/coerced", ch))
+            chan_enabled         (db, prepend_ch("enabled", ch)),
+            preamp1              (db, prepend_ch("ant/preamp1", ch)),
+            preamp2              (db, prepend_ch("ant/preamp2", ch)),
+            lb_preamp_presel     (db, prepend_ch("ant/lb_preamp_presel", ch)),
+            signal_path          (db, prepend_ch("ch/signal_path", ch)),
+            lb_presel            (db, prepend_ch("ch/lb_presel", ch)),
+            hb_presel            (db, prepend_ch("ch/hb_presel", ch)),
+            input_atten          (db, prepend_ch("ant/input_atten", ch)),
+            lb_atten             (db, prepend_ch("ch/lb_atten", ch)),
+            hb_atten             (db, prepend_ch("ch/hb_atten", ch)),
+            lo1_source           (db, prepend_ch("ch/LO1/source", ch)),
+            lo2_source           (db, prepend_ch("ch/LO2/source", ch)),
+            lo1_freq_d           (db, prepend_ch("los/LO1/freq/desired", ch)),
+            lo2_freq_d           (db, prepend_ch("los/LO2/freq/desired", ch)),
+            lo1_charge_pump_d    (db, prepend_ch("los/LO1/charge_pump/desired", ch)),
+            lo2_charge_pump_d    (db, prepend_ch("los/LO2/charge_pump/desired", ch)),
+            lo1_freq_c           (db, prepend_ch("los/LO1/freq/coerced", ch)),
+            lo2_freq_c           (db, prepend_ch("los/LO2/freq/coerced", ch)),
+            lo1_charge_pump_c    (db, prepend_ch("los/LO1/charge_pump/coerced", ch)),
+            lo2_charge_pump_c    (db, prepend_ch("los/LO2/charge_pump/coerced", ch))
         {}
 
         //Inputs (channel specific)
@@ -584,17 +621,21 @@ private:
         experts::data_reader_t<twinrx_ctrl::signal_path_t>      signal_path;
         experts::data_reader_t<twinrx_ctrl::preselector_path_t> lb_presel;
         experts::data_reader_t<twinrx_ctrl::preselector_path_t> hb_presel;
-        experts::data_reader_t<boost::uint8_t>                  input_atten;
-        experts::data_reader_t<boost::uint8_t>                  lb_atten;
-        experts::data_reader_t<boost::uint8_t>                  hb_atten;
+        experts::data_reader_t<uint8_t>                         input_atten;
+        experts::data_reader_t<uint8_t>                         lb_atten;
+        experts::data_reader_t<uint8_t>                         hb_atten;
         experts::data_reader_t<twinrx_ctrl::lo_source_t>        lo1_source;
         experts::data_reader_t<twinrx_ctrl::lo_source_t>        lo2_source;
         experts::data_reader_t<double>                          lo1_freq_d;
         experts::data_reader_t<double>                          lo2_freq_d;
+        experts::data_reader_t<double>                          lo1_charge_pump_d;
+        experts::data_reader_t<double>                          lo2_charge_pump_d;
 
         //Output (channel specific)
         experts::data_writer_t<double>                          lo1_freq_c;
         experts::data_writer_t<double>                          lo2_freq_c;
+        experts::data_writer_t<double>                          lo1_charge_pump_c;
+        experts::data_writer_t<double>                          lo2_charge_pump_c;
     };
 
     //External interface

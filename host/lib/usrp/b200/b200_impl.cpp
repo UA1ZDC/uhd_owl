@@ -1,25 +1,15 @@
 //
 // Copyright 2012-2015 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include "b200_impl.hpp"
 #include "b200_regs.hpp"
 #include <uhd/config.hpp>
 #include <uhd/transport/usb_control.hpp>
-#include <uhd/utils/msg.hpp>
+#include <uhd/utils/log.hpp>
 #include <uhd/utils/cast.hpp>
 #include <uhd/exception.hpp>
 #include <uhd/utils/static.hpp>
@@ -27,9 +17,7 @@
 #include <uhd/utils/safe_call.hpp>
 #include <uhd/usrp/dboard_eeprom.hpp>
 #include <boost/format.hpp>
-#include <boost/assign/list_of.hpp>
 #include <boost/filesystem.hpp>
-#include <boost/thread/thread.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/functional/hash.hpp>
 #include <boost/make_shared.hpp>
@@ -37,6 +25,7 @@
 #include <cstdio>
 #include <ctime>
 #include <cmath>
+#include <chrono>
 
 #include "../../transport/libusb1_base.hpp"
 
@@ -45,7 +34,9 @@ using namespace uhd::usrp;
 using namespace uhd::usrp::gpio_atr;
 using namespace uhd::transport;
 
-static const boost::posix_time::milliseconds REENUMERATION_TIMEOUT_MS(3000);
+namespace {
+    constexpr int64_t  REENUMERATION_TIMEOUT_MS = 3000;
+}
 
 // B200 + B210:
 class b200_ad9361_client_t : public ad9361_params {
@@ -60,7 +51,7 @@ public:
         }
     }
     clocking_mode_t get_clocking_mode() {
-        return AD9361_XTAL_N_CLK_PATH;
+        return clocking_mode_t::AD9361_XTAL_N_CLK_PATH;
     }
     digital_interface_mode_t get_digital_interface_mode() {
         return AD9361_DDR_FDD_LVCMOS;
@@ -88,7 +79,7 @@ public:
         }
     }
     clocking_mode_t get_clocking_mode() {
-        return AD9361_XTAL_N_CLK_PATH;
+        return clocking_mode_t::AD9361_XTAL_N_CLK_PATH;
     }
     digital_interface_mode_t get_digital_interface_mode() {
         return AD9361_DDR_FDD_LVCMOS;
@@ -130,7 +121,7 @@ std::string check_option_valid(
 b200_product_t get_b200_product(const usb_device_handle::sptr& handle, const mboard_eeprom_t &mb_eeprom)
 {
     // Try USB PID first
-    boost::uint16_t product_id = handle->get_product_id();
+    uint16_t product_id = handle->get_product_id();
     if (B2XX_PID_TO_PRODUCT.has_key(product_id))
         return B2XX_PID_TO_PRODUCT[product_id];
 
@@ -138,7 +129,7 @@ b200_product_t get_b200_product(const usb_device_handle::sptr& handle, const mbo
     if (mb_eeprom["product"].empty()) {
         throw uhd::runtime_error("B200: Missing product ID on EEPROM.");
     }
-    product_id = boost::lexical_cast<boost::uint16_t>(mb_eeprom["product"]);
+    product_id = boost::lexical_cast<uint16_t>(mb_eeprom["product"]);
     if (not B2XX_PRODUCT_ID.has_key(product_id)) {
         throw uhd::runtime_error(str(
             boost::format("B200 unknown product code: 0x%04x")
@@ -153,8 +144,8 @@ std::vector<usb_device_handle::sptr> get_b200_device_handles(const device_addr_t
     std::vector<usb_device_handle::vid_pid_pair_t> vid_pid_pair_list;
 
     if(hint.has_key("vid") && hint.has_key("pid") && hint.has_key("type") && hint["type"] == "b200") {
-        vid_pid_pair_list.push_back(usb_device_handle::vid_pid_pair_t(uhd::cast::hexstr_cast<boost::uint16_t>(hint.get("vid")),
-                                                                      uhd::cast::hexstr_cast<boost::uint16_t>(hint.get("pid"))));
+        vid_pid_pair_list.push_back(usb_device_handle::vid_pid_pair_t(uhd::cast::hexstr_cast<uint16_t>(hint.get("vid")),
+                                                                      uhd::cast::hexstr_cast<uint16_t>(hint.get("pid"))));
     } else {
         vid_pid_pair_list = b200_vid_pid_pairs;
     }
@@ -172,7 +163,7 @@ static device_addrs_t b200_find(const device_addr_t &hint)
 
     //Return an empty list of addresses when an address or resource is specified,
     //since an address and resource is intended for a different, non-USB, device.
-    BOOST_FOREACH(device_addr_t hint_i, separate_device_addr(hint)) {
+    for(device_addr_t hint_i:  separate_device_addr(hint)) {
         if (hint_i.has_key("addr") || hint_i.has_key("resource")) return b200_addrs;
     }
 
@@ -182,7 +173,7 @@ static device_addrs_t b200_find(const device_addr_t &hint)
     // so that re-enumeration after fw load can occur successfully.
     // This requirement is a courtesy of libusb1.0 on windows.
     size_t found = 0;
-    BOOST_FOREACH(usb_device_handle::sptr handle, get_b200_device_handles(hint)) {
+    for(usb_device_handle::sptr handle:  get_b200_device_handles(hint)) {
         //extract the firmware path for the b200
         std::string b200_fw_image;
         try{
@@ -190,10 +181,10 @@ static device_addrs_t b200_find(const device_addr_t &hint)
             b200_fw_image = uhd::find_image_path(b200_fw_image, STR(UHD_IMAGES_DIR)); // FIXME
         }
         catch(uhd::exception &e){
-            UHD_MSG(warning) << e.what();
+            UHD_LOGGER_WARNING("B200") << e.what();
             return b200_addrs;
         }
-        UHD_LOG << "the firmware image: " << b200_fw_image << std::endl;
+        UHD_LOGGER_DEBUG("B200") << "the firmware image: " << b200_fw_image ;
 
         usb_control::sptr control;
         try{control = usb_control::make(handle, 0);}
@@ -208,19 +199,20 @@ static device_addrs_t b200_find(const device_addr_t &hint)
         found++;
     }
 
-    const boost::system_time timeout_time = boost::get_system_time() + REENUMERATION_TIMEOUT_MS;
-
+    const auto timeout_time =
+        std::chrono::steady_clock::now()
+        + std::chrono::milliseconds(REENUMERATION_TIMEOUT_MS);
     //search for the device until found or timeout
-    while (boost::get_system_time() < timeout_time and b200_addrs.empty() and found != 0)
-    {
-        BOOST_FOREACH(usb_device_handle::sptr handle, get_b200_device_handles(hint))
-        {
+    while (std::chrono::steady_clock::now() < timeout_time
+            and b200_addrs.empty()
+            and found != 0) {
+        for(usb_device_handle::sptr handle:  get_b200_device_handles(hint)) {
             usb_control::sptr control;
             try{control = usb_control::make(handle, 0);}
             catch(const uhd::exception &){continue;} //ignore claimed
 
             b200_iface::sptr iface = b200_iface::make(control);
-            const mboard_eeprom_t mb_eeprom = mboard_eeprom_t(*iface, "B200");
+            const mboard_eeprom_t mb_eeprom = b200_impl::get_mb_eeprom(iface);
 
             device_addr_t new_addr;
             new_addr["type"] = "b200";
@@ -261,7 +253,7 @@ static device::sptr b200_make(const device_addr_t &device_addr)
         return device::sptr(new b200_impl(device_addr, handle));
     }
     catch (const uhd::usb_error &) {
-        UHD_MSG(status) << "Detected bad USB state; resetting." << std::endl;
+        UHD_LOGGER_INFO("B200") << "Detected bad USB state; resetting." ;
         libusb::device_handle::sptr dev_handle(libusb::device_handle::get_cached_handle(
             boost::static_pointer_cast<libusb::special_handle>(handle)->get_device()
         ));
@@ -284,6 +276,7 @@ UHD_STATIC_BLOCK(register_b200_device)
 b200_impl::b200_impl(const uhd::device_addr_t& device_addr, usb_device_handle::sptr &handle) :
     _product(B200), // Some safe value
     _revision(0),
+    _enable_user_regs(device_addr.has_key("enable_user_regs")),
     _time_source(UNKNOWN),
     _tick_rate(0.0) // Forces a clock initialization at startup
 {
@@ -292,20 +285,20 @@ b200_impl::b200_impl(const uhd::device_addr_t& device_addr, usb_device_handle::s
     const fs_path mb_path = "/mboards/0";
 
     //try to match the given device address with something on the USB bus
-    boost::uint16_t vid = B200_VENDOR_ID;
-    boost::uint16_t pid = B200_PRODUCT_ID;
+    uint16_t vid = B200_VENDOR_ID;
+    uint16_t pid = B200_PRODUCT_ID;
     bool specified_vid = false;
     bool specified_pid = false;
 
     if (device_addr.has_key("vid"))
     {
-        vid = uhd::cast::hexstr_cast<boost::uint16_t>(device_addr.get("vid"));
+        vid = uhd::cast::hexstr_cast<uint16_t>(device_addr.get("vid"));
         specified_vid = true;
     }
 
     if (device_addr.has_key("pid"))
     {
-        pid = uhd::cast::hexstr_cast<boost::uint16_t>(device_addr.get("pid"));
+        pid = uhd::cast::hexstr_cast<uint16_t>(device_addr.get("pid"));
         specified_pid = true;
     }
 
@@ -344,7 +337,7 @@ b200_impl::b200_impl(const uhd::device_addr_t& device_addr, usb_device_handle::s
     std::vector<usb_device_handle::sptr> device_list = usb_device_handle::get_device_list(vid_pid_pair_list);
 
     //locate the matching handle in the device list
-    BOOST_FOREACH(usb_device_handle::sptr dev_handle, device_list) {
+    for(usb_device_handle::sptr dev_handle:  device_list) {
         try {
             if (dev_handle->get_serial() == device_addr["serial"]){
                 handle = dev_handle;
@@ -362,7 +355,7 @@ b200_impl::b200_impl(const uhd::device_addr_t& device_addr, usb_device_handle::s
     ////////////////////////////////////////////////////////////////////
     // setup the mboard eeprom
     ////////////////////////////////////////////////////////////////////
-    const mboard_eeprom_t mb_eeprom(*_iface, "B200");
+    const mboard_eeprom_t mb_eeprom = get_mb_eeprom(_iface);
     _tree->create<mboard_eeprom_t>(mb_path / "eeprom")
         .set(mb_eeprom)
         .add_coerced_subscriber(boost::bind(&b200_impl::set_mb_eeprom, this, _1));
@@ -390,7 +383,7 @@ b200_impl::b200_impl(const uhd::device_addr_t& device_addr, usb_device_handle::s
         _revision = boost::lexical_cast<size_t>(mb_eeprom["revision"]);
     }
 
-    UHD_MSG(status) << "Detected Device: " << B2XX_STR_NAMES[_product] << std::endl;
+    UHD_LOGGER_INFO("B200") << "Detected Device: " << B2XX_STR_NAMES[_product] ;
 
     _gpsdo_capable = (not (_product == B200MINI or _product == B205MINI));
 
@@ -425,7 +418,7 @@ b200_impl::b200_impl(const uhd::device_addr_t& device_addr, usb_device_handle::s
         device_addr.has_key("fpga")? device_addr["fpga"] : default_file_name
     );
 
-    boost::uint32_t status = _iface->load_fpga(b200_fpga_image);
+    uint32_t status = _iface->load_fpga(b200_fpga_image);
 
     if(status != 0) {
         throw uhd::runtime_error(str(boost::format("fx3 is in state %1%") % status));
@@ -436,8 +429,8 @@ b200_impl::b200_impl(const uhd::device_addr_t& device_addr, usb_device_handle::s
     ////////////////////////////////////////////////////////////////////
     // Create control transport
     ////////////////////////////////////////////////////////////////////
-    boost::uint8_t usb_speed = _iface->get_usb_speed();
-    UHD_MSG(status) << "Operating over USB " << (int) usb_speed << "." << std::endl;
+    uint8_t usb_speed = _iface->get_usb_speed();
+    UHD_LOGGER_INFO("B200") << "Operating over USB " << (int) usb_speed << "." ;
     const std::string min_frame_size = (usb_speed == 3) ? "1024" : "512";
 
     device_addr_t ctrl_xport_args;
@@ -488,19 +481,18 @@ b200_impl::b200_impl(const uhd::device_addr_t& device_addr, usb_device_handle::s
 
         if ((_local_ctrl->peek32(RB32_CORE_STATUS) & 0xff) != B200_GPSDO_ST_NONE)
         {
-            UHD_MSG(status) << "Detecting internal GPSDO.... " << std::flush;
+            UHD_LOGGER_INFO("B200") << "Detecting internal GPSDO.... " << std::flush;
             try
             {
                 _gps = gps_ctrl::make(_async_task_data->gpsdo_uart);
             }
             catch(std::exception &e)
             {
-                UHD_MSG(error) << "An error occurred making GPSDO control: " << e.what() << std::endl;
+                UHD_LOGGER_ERROR("B200") << "An error occurred making GPSDO control: " << e.what();
             }
             if (_gps and _gps->gps_detected())
             {
-                //UHD_MSG(status) << "found" << std::endl;
-                BOOST_FOREACH(const std::string &name, _gps->get_sensors())
+                for(const std::string &name:  _gps->get_sensors())
                 {
                     _tree->create<sensor_value_t>(mb_path / "sensors" / name)
                         .set_publisher(boost::bind(&gps_ctrl::get_sensor, _gps, name));
@@ -527,9 +519,48 @@ b200_impl::b200_impl(const uhd::device_addr_t& device_addr, usb_device_handle::s
     // before being cleared.
     ////////////////////////////////////////////////////////////////////
     device_addr_t data_xport_args;
-    data_xport_args["recv_frame_size"] = device_addr.get("recv_frame_size", "8192");
+    const int max_transfer = usb_speed == 3 ? 1024 : 512;
+    int recv_frame_size = device_addr.cast<int>(
+        "recv_frame_size",
+        B200_USB_DATA_DEFAULT_FRAME_SIZE
+    );
+    // Check that recv_frame_size limits.
+    if (recv_frame_size < B200_USB_DATA_MIN_RECV_FRAME_SIZE) {
+        UHD_LOGGER_WARNING("B200")
+            << "Requested recv_frame_size of " << recv_frame_size
+            << " is too small. It will be set to "
+            << B200_USB_DATA_MIN_RECV_FRAME_SIZE << ".";
+        recv_frame_size = B200_USB_DATA_MIN_RECV_FRAME_SIZE;
+    } else if (recv_frame_size > B200_USB_DATA_MAX_RECV_FRAME_SIZE) {
+        UHD_LOGGER_WARNING("B200")
+            << "Requested recv_frame_size of " << recv_frame_size
+            << " is too large. It will be set to "
+            << B200_USB_DATA_MAX_RECV_FRAME_SIZE << ".";
+        recv_frame_size = B200_USB_DATA_MAX_RECV_FRAME_SIZE;
+    } else if (recv_frame_size % max_transfer == 0 or recv_frame_size % 8 != 0) {
+        // The Cypress FX3 does not properly handle recv_frame_sizes that are
+        // aligned to the maximum transfer size and the FPGA code requires the
+        // data to be aligned to 8 byte words.  The code below coerces the
+        // recv_frame_size to a value that is a multiple of 8 bytes, not
+        // a multiple of the maximum transfer size, and aligned to 24 bytes
+        // to support full 8 byte word alignment for sc8, sc12, and sc16 data
+        // types.
+
+        // Align to 8 byte words
+        recv_frame_size += 8 - (recv_frame_size % 8);
+        if (recv_frame_size % max_transfer == 0) {
+            recv_frame_size = (((recv_frame_size - 16) / 24) * 24) + 16;
+        }
+        UHD_LOGGER_WARNING("B200")
+            << "The recv_frame_size must be a multiple of 8 bytes and not a multiple of "
+            << max_transfer << " bytes.  Requested recv_frame_size of "
+            << device_addr["recv_frame_size"]
+            << " coerced to " << recv_frame_size << ".";
+    }
+
+    data_xport_args["recv_frame_size"] = std::to_string(recv_frame_size);
     data_xport_args["num_recv_frames"] = device_addr.get("num_recv_frames", "16");
-    data_xport_args["send_frame_size"] = device_addr.get("send_frame_size", "8192");
+    data_xport_args["send_frame_size"] = device_addr.get("send_frame_size", std::to_string(B200_USB_DATA_DEFAULT_FRAME_SIZE));
     data_xport_args["num_send_frames"] = device_addr.get("num_send_frames", "16");
 
     // This may throw a uhd::usb_error, which will be caught by b200_make().
@@ -553,7 +584,8 @@ b200_impl::b200_impl(const uhd::device_addr_t& device_addr, usb_device_handle::s
     ////////////////////////////////////////////////////////////////////
     // Init codec - turns on clocks
     ////////////////////////////////////////////////////////////////////
-    UHD_MSG(status) << "Initialize CODEC control..." << std::endl;
+    UHD_LOGGER_INFO("B200") << "Initialize CODEC control..." ;
+    reset_codec();
     ad9361_params::sptr client_settings;
     if (_product == B200MINI or _product == B205MINI) {
         client_settings = boost::make_shared<b2xxmini_ad9361_client_t>();
@@ -583,6 +615,11 @@ b200_impl::b200_impl(const uhd::device_addr_t& device_addr, usb_device_handle::s
         .set_coercer(boost::bind(&b200_impl::set_tick_rate, this, _1))
         .set_publisher(boost::bind(&b200_impl::get_tick_rate, this))
         .add_coerced_subscriber(boost::bind(&b200_impl::update_tick_rate, this, _1));
+    _tree->create<meta_range_t>(mb_path / "tick_rate/range")
+        .set_publisher([this](){
+            return this->_codec_ctrl->get_clock_rate_range();
+        })
+    ;
     _tree->create<time_spec_t>(mb_path / "time" / "cmd");
     _tree->create<bool>(mb_path / "auto_tick_rate").set(false);
 
@@ -610,7 +647,7 @@ b200_impl::b200_impl(const uhd::device_addr_t& device_addr, usb_device_handle::s
     ////////////////////////////////////////////////////////////////////
     // setup radio control
     ////////////////////////////////////////////////////////////////////
-    UHD_MSG(status) << "Initialize Radio control..." << std::endl;
+    UHD_LOGGER_INFO("B200") << "Initialize Radio control..." ;
     const size_t num_radio_chains = ((_local_ctrl->peek32(RB32_CORE_STATUS) >> 8) & 0xff);
     UHD_ASSERT_THROW(num_radio_chains > 0);
     UHD_ASSERT_THROW(num_radio_chains <= 2);
@@ -621,13 +658,14 @@ b200_impl::b200_impl(const uhd::device_addr_t& device_addr, usb_device_handle::s
         this->setup_radio(i);
 
     //now test each radio module's connection to the codec interface
-    BOOST_FOREACH(radio_perifs_t &perif, _radio_perifs)
-    {
+    for (radio_perifs_t &perif : _radio_perifs) {
         _codec_mgr->loopback_self_test(
-            boost::bind(
-                &radio_ctrl_core_3000::poke32, perif.ctrl, TOREG(SR_CODEC_IDLE), _1
-            ),
-            boost::bind(&radio_ctrl_core_3000::peek64, perif.ctrl, RB64_CODEC_READBACK)
+            [&perif](const uint32_t value){
+                perif.ctrl->poke32(TOREG(SR_CODEC_IDLE), value);
+            },
+            [&perif](){
+                return perif.ctrl->peek64(RB64_CODEC_READBACK);
+            }
         );
     }
 
@@ -641,25 +679,27 @@ b200_impl::b200_impl(const uhd::device_addr_t& device_addr, usb_device_handle::s
         .add_coerced_subscriber(boost::bind(&b200_impl::sync_times, this));
     _tree->create<time_spec_t>(mb_path / "time" / "pps")
         .set_publisher(boost::bind(&time_core_3000::get_time_last_pps, _radio_perifs[0].time64));
-    BOOST_FOREACH(radio_perifs_t &perif, _radio_perifs)
+    for(radio_perifs_t &perif:  _radio_perifs)
     {
         _tree->access<time_spec_t>(mb_path / "time" / "pps")
             .add_coerced_subscriber(boost::bind(&time_core_3000::set_time_next_pps, perif.time64, _1));
     }
 
     //setup time source props
-    static const std::vector<std::string> time_sources = (_gpsdo_capable) ?
-                                boost::assign::list_of("none")("internal")("external")("gpsdo") :
-                                boost::assign::list_of("none")("internal")("external") ;
+    const std::vector<std::string> time_sources =
+        (_gpsdo_capable) ?
+        std::vector<std::string>{"none", "internal", "external", "gpsdo"} :
+        std::vector<std::string>{"none", "internal", "external"};
     _tree->create<std::vector<std::string> >(mb_path / "time_source" / "options")
         .set(time_sources);
     _tree->create<std::string>(mb_path / "time_source" / "value")
         .set_coercer(boost::bind(&check_option_valid, "time source", time_sources, _1))
         .add_coerced_subscriber(boost::bind(&b200_impl::update_time_source, this, _1));
     //setup reference source props
-    static const std::vector<std::string> clock_sources = (_gpsdo_capable) ?
-                                boost::assign::list_of("internal")("external")("gpsdo") :
-                                boost::assign::list_of("internal")("external") ;
+    const std::vector<std::string> clock_sources =
+        (_gpsdo_capable) ?
+        std::vector<std::string>{"internal", "external", "gpsdo"} :
+        std::vector<std::string>{"internal", "external"};
     _tree->create<std::vector<std::string> >(mb_path / "clock_source" / "options")
         .set(clock_sources);
     _tree->create<std::string>(mb_path / "clock_source" / "value")
@@ -670,14 +710,37 @@ b200_impl::b200_impl(const uhd::device_addr_t& device_addr, usb_device_handle::s
     // front panel gpio
     ////////////////////////////////////////////////////////////////////
     _radio_perifs[0].fp_gpio = gpio_atr_3000::make(_radio_perifs[0].ctrl, TOREG(SR_FP_GPIO), RB32_FP_GPIO);
-    BOOST_FOREACH(const gpio_attr_map_t::value_type attr, gpio_attr_map)
-    {
-            _tree->create<boost::uint32_t>(mb_path / "gpio" / "FP0" / attr.second)
-            .set(0)
-            .add_coerced_subscriber(boost::bind(&gpio_atr_3000::set_gpio_attr, _radio_perifs[0].fp_gpio, attr.first, _1));
+    for(const gpio_attr_map_t::value_type attr:  gpio_attr_map)
+    {       switch (attr.first){
+                case usrp::gpio_atr::GPIO_SRC:
+                    _tree->create<std::vector<std::string>>(mb_path / "gpio" / "FP0" / attr.second)
+                        .set(std::vector<std::string>(32, usrp::gpio_atr::default_attr_value_map.at(attr.first)))
+                        .add_coerced_subscriber([this](const std::vector<std::string>&){
+                           throw uhd::runtime_error("This device does not support setting the GPIO_SRC attribute.");
+                        });
+                    break;
+                case usrp::gpio_atr::GPIO_CTRL:
+                case usrp::gpio_atr::GPIO_DDR:
+                    _tree->create<std::vector<std::string>>(mb_path / "gpio" / "FP0" / attr.second)
+                        .set(std::vector<std::string>(32, usrp::gpio_atr::default_attr_value_map.at(attr.first)))
+                        .add_coerced_subscriber([this, attr](const std::vector<std::string> str_val){
+                           uint32_t val = 0;
+                           for(size_t i = 0 ; i < str_val.size() ; i++){
+                               val += usrp::gpio_atr::gpio_attr_value_pair.at(attr.second).at(str_val[i])<<i;
+                           }
+                           _radio_perifs[0].fp_gpio->set_gpio_attr(attr.first, val);
+                        });
+                    break;
+                case usrp::gpio_atr::GPIO_READBACK:
+                    _tree->create<uint32_t>(mb_path / "gpio" / "FP0" / "READBACK")
+                        .set_publisher(boost::bind(&gpio_atr_3000::read_gpio, _radio_perifs[0].fp_gpio));
+                    break;
+                default:
+                    _tree->create<uint32_t>(mb_path / "gpio" / "FP0" / attr.second)
+                    .set(0)
+                    .add_coerced_subscriber(boost::bind(&gpio_atr_3000::set_gpio_attr, _radio_perifs[0].fp_gpio, attr.first, _1));
+            }
     }
-    _tree->create<boost::uint32_t>(mb_path / "gpio" / "FP0" / "READBACK")
-        .set_publisher(boost::bind(&gpio_atr_3000::read_gpio, _radio_perifs[0].fp_gpio));
 
     ////////////////////////////////////////////////////////////////////
     // dboard eeproms but not really
@@ -692,7 +755,7 @@ b200_impl::b200_impl(const uhd::device_addr_t& device_addr, usb_device_handle::s
     ////////////////////////////////////////////////////////////////////
     // Init the clock rate and the auto mcr appropriately
     if (not device_addr.has_key("master_clock_rate")) {
-        UHD_MSG(status) << "Setting master clock rate selection to 'automatic'." << std::endl;
+        UHD_LOGGER_INFO("B200") << "Setting master clock rate selection to 'automatic'." ;
     }
     // We can automatically choose a master clock rate, but not if the user specifies one
     const double default_tick_rate = device_addr.cast<double>("master_clock_rate", ad936x_manager::DEFAULT_TICK_RATE);
@@ -701,11 +764,11 @@ b200_impl::b200_impl(const uhd::device_addr_t& device_addr, usb_device_handle::s
 
     //subdev spec contains full width of selections
     subdev_spec_t rx_spec, tx_spec;
-    BOOST_FOREACH(const std::string &fe, _tree->list(mb_path / "dboards" / "A" / "rx_frontends"))
+    for(const std::string &fe:  _tree->list(mb_path / "dboards" / "A" / "rx_frontends"))
     {
         rx_spec.push_back(subdev_spec_pair_t("A", fe));
     }
-    BOOST_FOREACH(const std::string &fe, _tree->list(mb_path / "dboards" / "A" / "tx_frontends"))
+    for(const std::string &fe:  _tree->list(mb_path / "dboards" / "A" / "tx_frontends"))
     {
         tx_spec.push_back(subdev_spec_pair_t("A", fe));
     }
@@ -734,15 +797,6 @@ b200_impl::~b200_impl(void)
 /***********************************************************************
  * setup radio control objects
  **********************************************************************/
-
-void lambda_set_bool_prop(boost::weak_ptr<property_tree> tree_wptr, fs_path path, bool value, double)
-{
-    property_tree::sptr tree = tree_wptr.lock();
-    if (tree) {
-        tree->access<bool>(path).set(value);
-    }
-}
-
 void b200_impl::setup_radio(const size_t dspno)
 {
     radio_perifs_t &perif = _radio_perifs[dspno];
@@ -751,7 +805,7 @@ void b200_impl::setup_radio(const size_t dspno)
     ////////////////////////////////////////////////////////////////////
     // Set up transport
     ////////////////////////////////////////////////////////////////////
-    const boost::uint32_t sid = (dspno == 0) ? B200_CTRL0_MSG_SID : B200_CTRL1_MSG_SID;
+    const uint32_t sid = (dspno == 0) ? B200_CTRL0_MSG_SID : B200_CTRL1_MSG_SID;
 
     ////////////////////////////////////////////////////////////////////
     // radio control
@@ -784,6 +838,18 @@ void b200_impl::setup_radio(const size_t dspno)
     perif.duc = tx_dsp_core_3000::make(perif.ctrl, TOREG(SR_TX_DSP));
     perif.duc->set_link_rate(10e9/8); //whatever
     perif.duc->set_freq(tx_dsp_core_3000::DEFAULT_CORDIC_FREQ);
+    if (_enable_user_regs) {
+        UHD_LOG_DEBUG("B200", "Enabling user settings registers");
+        perif.user_settings = user_settings_core_3000::make(perif.ctrl,
+            TOREG(SR_USER_SR_BASE),
+            TOREG(SR_USER_RB_ADDR)
+        );
+        if (!perif.user_settings) {
+            const std::string error_msg = "Failed to create user settings bus!";
+            UHD_LOG_ERROR("B200", error_msg);
+            throw uhd::runtime_error(error_msg);
+        }
+    }
 
     ////////////////////////////////////////////////////////////////////
     // create time control objects
@@ -801,7 +867,12 @@ void b200_impl::setup_radio(const size_t dspno)
     _tree->create<bool>(rx_dsp_path / "rate" / "set").set(false);
     _tree->access<double>(rx_dsp_path / "rate" / "value")
         .set_coercer(boost::bind(&b200_impl::coerce_rx_samp_rate, this, perif.ddc, dspno, _1))
-        .add_coerced_subscriber(boost::bind(&lambda_set_bool_prop, boost::weak_ptr<property_tree>(_tree), rx_dsp_path / "rate" / "set", true, _1))
+        .add_coerced_subscriber([this, rx_dsp_path](const double){
+            if (this->_tree) {
+                this->_tree->access<bool>(rx_dsp_path / "rate" / "set")
+                    .set(true);
+            }
+        })
         .add_coerced_subscriber(boost::bind(&b200_impl::update_rx_samp_rate, this, dspno, _1))
     ;
     _tree->create<stream_cmd_t>(rx_dsp_path / "stream_cmd")
@@ -819,7 +890,12 @@ void b200_impl::setup_radio(const size_t dspno)
     _tree->create<bool>(tx_dsp_path / "rate" / "set").set(false);
     _tree->access<double>(tx_dsp_path / "rate" / "value")
         .set_coercer(boost::bind(&b200_impl::coerce_tx_samp_rate, this, perif.duc, dspno, _1))
-        .add_coerced_subscriber(boost::bind(&lambda_set_bool_prop, boost::weak_ptr<property_tree>(_tree), tx_dsp_path / "rate" / "set", true, _1))
+        .add_coerced_subscriber([this, tx_dsp_path](const double){
+            if (this->_tree) {
+                this->_tree->access<bool>(tx_dsp_path / "rate" / "set")
+                    .set(true);
+            }
+        })
         .add_coerced_subscriber(boost::bind(&b200_impl::update_tx_samp_rate, this, dspno, _1))
     ;
     _tree->access<double>(mb_path / "tick_rate")
@@ -829,8 +905,7 @@ void b200_impl::setup_radio(const size_t dspno)
     ////////////////////////////////////////////////////////////////////
     // create RF frontend interfacing
     ////////////////////////////////////////////////////////////////////
-    static const std::vector<direction_t> dirs = boost::assign::list_of(RX_DIRECTION)(TX_DIRECTION);
-    BOOST_FOREACH(direction_t dir, dirs) {
+    for (direction_t dir : std::vector<direction_t>{RX_DIRECTION, TX_DIRECTION}) {
         const std::string x = (dir == RX_DIRECTION) ? "rx" : "tx";
         const std::string key = std::string(((dir == RX_DIRECTION) ? "RX" : "TX")) + std::string(((dspno == _fe1) ? "1" : "2"));
         const fs_path rf_fe_path
@@ -850,7 +925,7 @@ void b200_impl::setup_radio(const size_t dspno)
         ;
         if (dir == RX_DIRECTION)
         {
-            static const std::vector<std::string> ants = boost::assign::list_of("TX/RX")("RX2");
+            static const std::vector<std::string> ants{"TX/RX", "RX2"};
             _tree->create<std::vector<std::string> >(rf_fe_path / "antenna" / "options").set(ants);
             _tree->create<std::string>(rf_fe_path / "antenna" / "value")
                 .add_coerced_subscriber(boost::bind(&b200_impl::update_antenna_sel, this, dspno, _1))
@@ -864,6 +939,11 @@ void b200_impl::setup_radio(const size_t dspno)
             _tree->create<std::vector<std::string> >(rf_fe_path / "antenna" / "options").set(ants);
             _tree->create<std::string>(rf_fe_path / "antenna" / "value").set("TX/RX");
         }
+
+        if (_enable_user_regs) {
+            _tree->create<uhd::wb_iface::sptr>(rf_fe_path / "user_settings/iface")
+                .set(perif.user_settings);
+        }
     }
 }
 
@@ -874,16 +954,16 @@ void b200_impl::setup_radio(const size_t dspno)
 void b200_impl::register_loopback_self_test(wb_iface::sptr iface)
 {
     bool test_fail = false;
-    UHD_MSG(status) << "Performing register loopback test... " << std::flush;
+    UHD_LOGGER_INFO("B200") << "Performing register loopback test... ";
     size_t hash = size_t(time(NULL));
     for (size_t i = 0; i < 100; i++)
     {
         boost::hash_combine(hash, i);
-        iface->poke32(TOREG(SR_TEST), boost::uint32_t(hash));
-        test_fail = iface->peek32(RB32_TEST) != boost::uint32_t(hash);
+        iface->poke32(TOREG(SR_TEST), uint32_t(hash));
+        test_fail = iface->peek32(RB32_TEST) != uint32_t(hash);
         if (test_fail) break; //exit loop on any failure
     }
-    UHD_MSG(status) << ((test_fail)? "fail" : "pass") << std::endl;
+    UHD_LOGGER_INFO("B200") << "Register loopback test " << ((test_fail)? "failed" : "passed") ;
 }
 
 /***********************************************************************
@@ -914,25 +994,36 @@ void b200_impl::enforce_tick_rate_limits(size_t chan_count, double tick_rate, co
                     % (direction.empty() ? "data" : direction)
             ));
         }
+        const double min_tick_rate = ad9361_device_t::AD9361_MIN_CLOCK_RATE / ((chan_count <= 1) ? 1 : 2);
+        if (min_tick_rate - tick_rate >= 1.0)
+        {
+            throw uhd::value_error(boost::str(
+                boost::format("current master clock rate (%.6f MHz) is less than minimum possible master clock rate (%.6f MHz) when using %d %s channels")
+                    % (tick_rate/1e6)
+                    % (min_tick_rate/1e6)
+                    % chan_count
+                    % (direction.empty() ? "data" : direction)
+            ));
+        }
     }
 }
 
 double b200_impl::set_tick_rate(const double new_tick_rate)
 {
-    UHD_MSG(status) << (boost::format("Asking for clock rate %.6f MHz... ") % (new_tick_rate/1e6)) << std::flush;
+    UHD_LOGGER_INFO("B200") << (boost::format("Asking for clock rate %.6f MHz... ") % (new_tick_rate/1e6)) << std::flush;
     check_tick_rate_with_current_streamers(new_tick_rate);   // Defined in b200_io_impl.cpp
 
     // Make sure the clock rate is actually changed before doing
     // the full Monty of setting regs and loopback tests etc.
     if (std::abs(new_tick_rate - _tick_rate) < 1.0) {
-        UHD_MSG(status) << "OK" << std::endl;
+        UHD_LOGGER_INFO("B200") << "OK" ;
         return _tick_rate;
     }
 
     _tick_rate = _codec_ctrl->set_clock_rate(new_tick_rate);
-    UHD_MSG(status) << std::endl << (boost::format("Actually got clock rate %.6f MHz.") % (_tick_rate/1e6)) << std::endl;
+    UHD_LOGGER_INFO("B200")  << (boost::format("Actually got clock rate %.6f MHz.") % (_tick_rate/1e6)) ;
 
-    BOOST_FOREACH(radio_perifs_t &perif, _radio_perifs)
+    for(radio_perifs_t &perif:  _radio_perifs)
     {
         perif.time64->set_tick_rate(_tick_rate);
         perif.time64->self_test();
@@ -946,9 +1037,9 @@ double b200_impl::set_tick_rate(const double new_tick_rate)
 
 void b200_impl::check_fw_compat(void)
 {
-    boost::uint16_t compat_num = _iface->get_compat_num();
-    boost::uint32_t compat_major = (boost::uint32_t) (compat_num >> 8);
-    boost::uint32_t compat_minor = (boost::uint32_t) (compat_num & 0xFF);
+    uint16_t compat_num = _iface->get_compat_num();
+    uint32_t compat_major = (uint32_t) (compat_num >> 8);
+    uint32_t compat_minor = (uint32_t) (compat_num & 0xFF);
 
     if (compat_major != B200_FW_COMPAT_NUM_MAJOR){
         throw uhd::runtime_error(str(boost::format(
@@ -964,14 +1055,14 @@ void b200_impl::check_fw_compat(void)
 
 void b200_impl::check_fpga_compat(void)
 {
-    const boost::uint64_t compat = _local_ctrl->peek64(0);
-    const boost::uint32_t signature = boost::uint32_t(compat >> 32);
-    const boost::uint16_t compat_major = boost::uint16_t(compat >> 16);
-    const boost::uint16_t compat_minor = boost::uint16_t(compat & 0xffff);
+    const uint64_t compat = _local_ctrl->peek64(0);
+    const uint32_t signature = uint32_t(compat >> 32);
+    const uint16_t compat_major = uint16_t(compat >> 16);
+    const uint16_t compat_minor = uint16_t(compat & 0xffff);
     if (signature != 0xACE0BA5E) throw uhd::runtime_error(
         "b200::check_fpga_compat signature register readback failed");
 
-    const boost::uint16_t expected = ((_product == B200MINI or _product == B205MINI) ? B205_FPGA_COMPAT_NUM : B200_FPGA_COMPAT_NUM);
+    const uint16_t expected = ((_product == B200MINI or _product == B205MINI) ? B205_FPGA_COMPAT_NUM : B200_FPGA_COMPAT_NUM);
     if (compat_major != expected)
     {
         throw uhd::runtime_error(str(boost::format(
@@ -982,11 +1073,6 @@ void b200_impl::check_fpga_compat(void)
     }
     _tree->create<std::string>("/mboards/0/fpga_version").set(str(boost::format("%u.%u")
                 % compat_major % compat_minor));
-}
-
-void b200_impl::set_mb_eeprom(const uhd::usrp::mboard_eeprom_t &mb_eeprom)
-{
-    mb_eeprom.commit(*_iface, "B200");
 }
 
 /***********************************************************************
@@ -1041,8 +1127,11 @@ void b200_impl::update_clock_source(const std::string &source)
         }
         _adf4001_iface->set_lock_to_ext_ref(true);
     }
-    else if (_gps and source == "gpsdo")
+    else if (source == "gpsdo")
     {
+        if (not _gps or not _gps->gps_detected()) {
+            throw uhd::key_error("update_clock_source: gpsdo selected, but no gpsdo detected!");
+        }
         if (_gpio_state.ref_sel != 1)
         {
             _gpio_state.ref_sel = 1;
@@ -1085,9 +1174,9 @@ void b200_impl::update_time_source(const std::string &source)
 
 void b200_impl::set_time(const uhd::time_spec_t& t)
 {
-    BOOST_FOREACH(radio_perifs_t &perif, _radio_perifs)
+    for(radio_perifs_t &perif:  _radio_perifs)
         perif.time64->set_time_sync(t);
-    _local_ctrl->poke32(TOREG(SR_CORE_SYNC), 1 << 2 | boost::uint32_t(_time_source));
+    _local_ctrl->poke32(TOREG(SR_CORE_SYNC), 1 << 2 | uint32_t(_time_source));
     _local_ctrl->poke32(TOREG(SR_CORE_SYNC), _time_source);
 }
 
@@ -1140,16 +1229,24 @@ void b200_impl::update_bandsel(const std::string& which, double freq)
     update_gpio_state();
 }
 
+void b200_impl::reset_codec()
+{
+    _gpio_state.codec_arst = 1;
+    update_gpio_state();
+    _gpio_state.codec_arst = 0;
+    update_gpio_state();
+}
+
 void b200_impl::update_gpio_state(void)
 {
-    const boost::uint32_t misc_word = 0
+    const uint32_t misc_word = 0
         | (_gpio_state.swap_atr << 8)
         | (_gpio_state.tx_bandsel_a << 7)
         | (_gpio_state.tx_bandsel_b << 6)
         | (_gpio_state.rx_bandsel_a << 5)
         | (_gpio_state.rx_bandsel_b << 4)
         | (_gpio_state.rx_bandsel_c << 3)
-        // Bit 2 currently not used.
+        | (_gpio_state.codec_arst << 2)
         | (_gpio_state.mimo << 1)
         | (_gpio_state.ref_sel << 0)
     ;
@@ -1165,9 +1262,9 @@ void b200_impl::update_atrs(void)
         const bool enb_rx = bool(perif.rx_streamer.lock());
         const bool enb_tx = bool(perif.tx_streamer.lock());
         const bool is_rx2 = perif.ant_rx2;
-        const size_t rxonly = (enb_rx)? ((is_rx2)? STATE_RX1_RX2 : STATE_RX1_TXRX) : STATE_OFF;
-        const size_t txonly = (enb_tx)? (STATE_TX1_TXRX) : STATE_OFF;
-        size_t fd = STATE_OFF;
+        const uint32_t rxonly = (enb_rx)? ((is_rx2)? STATE_RX1_RX2 : STATE_RX1_TXRX) : STATE_OFF;
+        const uint32_t txonly = (enb_tx)? (STATE_TX1_TXRX) : STATE_OFF;
+        uint32_t fd = STATE_OFF;
         if (enb_rx and enb_tx) fd = STATE_FDX1_TXRX;
         if (enb_rx and not enb_tx) fd = rxonly;
         if (not enb_rx and enb_tx) fd = txonly;
@@ -1183,9 +1280,9 @@ void b200_impl::update_atrs(void)
         const bool enb_rx = bool(perif.rx_streamer.lock());
         const bool enb_tx = bool(perif.tx_streamer.lock());
         const bool is_rx2 = perif.ant_rx2;
-        const size_t rxonly = (enb_rx)? ((is_rx2)? STATE_RX2_RX2 : STATE_RX2_TXRX) : STATE_OFF;
-        const size_t txonly = (enb_tx)? (STATE_TX2_TXRX) : STATE_OFF;
-        size_t fd = STATE_OFF;
+        const uint32_t rxonly = (enb_rx)? ((is_rx2)? STATE_RX2_RX2 : STATE_RX2_TXRX) : STATE_OFF;
+        const uint32_t txonly = (enb_tx)? (STATE_TX2_TXRX) : STATE_OFF;
+        uint32_t fd = STATE_OFF;
         if (enb_rx and enb_tx) fd = STATE_FDX2_TXRX;
         if (enb_rx and not enb_tx) fd = rxonly;
         if (not enb_rx and enb_tx) fd = txonly;
@@ -1240,7 +1337,7 @@ sensor_value_t b200_impl::get_ref_locked(void)
 
 sensor_value_t b200_impl::get_fe_pll_locked(const bool is_tx)
 {
-    const boost::uint32_t st = _local_ctrl->peek32(RB32_CORE_PLL);
+    const uint32_t st = _local_ctrl->peek32(RB32_CORE_PLL);
     const bool locked = is_tx ? ((st & 0x1) > 0) : ((st & 0x2) > 0);
     return sensor_value_t("LO", locked, "locked", "unlocked");
 }

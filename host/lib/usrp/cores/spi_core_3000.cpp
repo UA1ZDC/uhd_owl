@@ -1,23 +1,13 @@
 //
 // Copyright 2013-2014 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-#include "spi_core_3000.hpp"
 #include <uhd/exception.hpp>
-#include <uhd/utils/msg.hpp>
+#include <uhd/utils/log.hpp>
+#include <uhdlib/usrp/cores/spi_core_3000.hpp>
 #include <boost/thread/thread.hpp> //sleep
 
 #define SPI_DIV      _base + 0
@@ -40,10 +30,10 @@ public:
         this->set_divider(30);
     }
 
-    boost::uint32_t transact_spi(
+    uint32_t transact_spi(
         int which_slave,
         const spi_config_t &config,
-        boost::uint32_t data,
+        uint32_t data,
         size_t num_bits,
         bool readback
     ){
@@ -64,7 +54,7 @@ public:
         }
 
         //load control word
-        boost::uint32_t ctrl_word = 0;
+        uint32_t ctrl_word = 0;
         ctrl_word |= ((which_slave & 0xffffff) << 0);
         ctrl_word |= ((num_bits & 0x3f) << 24);
         if (config.mosi_edge == spi_config_t::EDGE_FALL) ctrl_word |= (1 << 31);
@@ -78,7 +68,7 @@ public:
         }
 
         //load data word (must be in upper bits)
-        const boost::uint32_t data_out = data << (32 - num_bits);
+        const uint32_t data_out = data << (32 - num_bits);
 
         //send data word
         _iface->poke32(SPI_DATA, data_out);
@@ -113,7 +103,7 @@ private:
     wb_iface::sptr _iface;
     const size_t _base;
     const size_t _readback;
-    boost::uint32_t _ctrl_word_cache;
+    uint32_t _ctrl_word_cache;
     bool _shutdown_cache;
     boost::mutex _mutex;
     size_t _div;

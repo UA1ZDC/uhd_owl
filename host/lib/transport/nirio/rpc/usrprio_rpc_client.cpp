@@ -1,22 +1,17 @@
 //
 // Copyright 2013 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include <uhd/transport/nirio/rpc/usrprio_rpc_client.hpp>
 #include <uhd/utils/platform.hpp>
+
+namespace {
+    constexpr int64_t DEFAULT_TIMEOUT_IN_MS = 5000;
+}
+
 
 namespace uhd { namespace usrprio_rpc {
 
@@ -24,7 +19,7 @@ usrprio_rpc_client::usrprio_rpc_client(
     std::string server,
     std::string port
 ) : _rpc_client(server, port, uhd::get_process_id(), uhd::get_host_id()),
-    _timeout(boost::posix_time::milliseconds(DEFAULT_TIMEOUT_IN_MS))
+    _timeout(boost::posix_time::milliseconds(long(DEFAULT_TIMEOUT_IN_MS)))
 {
    _ctor_status = _rpc_client.status() ? NiRio_Status_RpcConnectionError : NiRio_Status_Success;
 }
@@ -42,7 +37,7 @@ nirio_status usrprio_rpc_client::niusrprio_enumerate(NIUSRPRIO_ENUMERATE_ARGS)
     usrprio_rpc::func_args_writer_t in_args;
     usrprio_rpc::func_args_reader_t out_args;
     nirio_status status = NiRio_Status_Success;
-    boost::uint32_t vtr_size = 0;
+    uint32_t vtr_size = 0;
 
     status = _boost_error_to_nirio_status(
         _rpc_client.call(NIUSRPRIO_ENUMERATE, in_args, out_args, _timeout));
@@ -68,7 +63,7 @@ nirio_status usrprio_rpc_client::niusrprio_open_session(NIUSRPRIO_OPEN_SESSION_A
     const std::string& resource,        \
     const std::string& path,            \
     const std::string& signature,       \
-    const boost::uint16_t& download_fpga
+    const uint16_t& download_fpga
 */
 {
     usrprio_rpc::func_args_writer_t in_args;
@@ -81,7 +76,7 @@ nirio_status usrprio_rpc_client::niusrprio_open_session(NIUSRPRIO_OPEN_SESSION_A
     in_args << download_fpga;
 
     //Open needs a longer timeout because the FPGA download can take upto 6 secs and the NiFpga libload can take 4.
-    static const boost::uint32_t OPEN_TIMEOUT = 15000;
+    static const uint32_t OPEN_TIMEOUT = 15000;
     status = _boost_error_to_nirio_status(
         _rpc_client.call(NIUSRPRIO_OPEN_SESSION, in_args, out_args, boost::posix_time::milliseconds(OPEN_TIMEOUT)));
 
@@ -163,7 +158,7 @@ nirio_status usrprio_rpc_client::niusrprio_get_interface_path(NIUSRPRIO_GET_INTE
 nirio_status usrprio_rpc_client::niusrprio_download_fpga_to_flash(NIUSRPRIO_DOWNLOAD_FPGA_TO_FLASH_ARGS)
 /*
 #define NIUSRPRIO_DOWNLOAD_FPGA_TO_FLASH_ARGS   \
-    const boost::uint32_t& interface_num,       \
+    const uint32_t& interface_num,       \
     const std::string& bitstream_path
 */
 {
@@ -174,7 +169,7 @@ nirio_status usrprio_rpc_client::niusrprio_download_fpga_to_flash(NIUSRPRIO_DOWN
     in_args << resource;
     in_args << bitstream_path;
 
-    static const boost::uint32_t DOWNLOAD_FPGA_TIMEOUT = 1200000;
+    static const uint32_t DOWNLOAD_FPGA_TIMEOUT = 1200000;
     status = _boost_error_to_nirio_status(
         _rpc_client.call(NIUSRPRIO_DOWNLOAD_FPGA_TO_FLASH, in_args, out_args,
             boost::posix_time::milliseconds(DOWNLOAD_FPGA_TIMEOUT)));

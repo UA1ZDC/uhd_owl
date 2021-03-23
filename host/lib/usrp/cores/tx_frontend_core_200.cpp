@@ -1,22 +1,13 @@
 //
 // Copyright 2011,2014 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-#include "tx_frontend_core_200.hpp"
+#include <uhdlib/usrp/cores/tx_frontend_core_200.hpp>
 #include <uhd/types/dict.hpp>
+#include <uhd/types/ranges.hpp>
 #include <uhd/exception.hpp>
 #include <boost/assign/list_of.hpp>
 #include <boost/math/special_functions/round.hpp>
@@ -33,8 +24,13 @@ using namespace uhd;
 const std::complex<double> tx_frontend_core_200::DEFAULT_DC_OFFSET_VALUE = std::complex<double>(0.0, 0.0);
 const std::complex<double> tx_frontend_core_200::DEFAULT_IQ_BALANCE_VALUE = std::complex<double>(0.0, 0.0);
 
-static boost::uint32_t fs_to_bits(const double num, const size_t bits){
-    return boost::int32_t(boost::math::round(num * (1 << (bits-1))));
+namespace {
+  static const double DC_OFFSET_MIN = -1.0;
+  static const double DC_OFFSET_MAX = 1.0;
+}
+
+static uint32_t fs_to_bits(const double num, const size_t bits){
+    return int32_t(boost::math::round(num * (1 << (bits-1))));
 }
 
 tx_frontend_core_200::~tx_frontend_core_200(void){
@@ -50,7 +46,7 @@ public:
     }
 
     void set_mux(const std::string &mode){
-        static const uhd::dict<std::string, boost::uint32_t> mode_to_mux = boost::assign::map_list_of
+        static const uhd::dict<std::string, uint32_t> mode_to_mux = boost::assign::map_list_of
             ("IQ", (0x1 << 4) | (0x0 << 0)) //DAC0Q=DUC0Q, DAC0I=DUC0I
             ("QI", (0x0 << 4) | (0x1 << 0)) //DAC0Q=DUC0I, DAC0I=DUC0Q
             ("I",  (0xf << 4) | (0x0 << 0)) //DAC0Q=ZERO,  DAC0I=DUC0I
@@ -61,8 +57,8 @@ public:
 
     std::complex<double> set_dc_offset(const std::complex<double> &off){
         static const double scaler = double(1ul << 23);
-        const boost::int32_t i_dc_off = boost::math::iround(off.real()*scaler);
-        const boost::int32_t q_dc_off = boost::math::iround(off.imag()*scaler);
+        const int32_t i_dc_off = boost::math::iround(off.real()*scaler);
+        const int32_t q_dc_off = boost::math::iround(off.imag()*scaler);
 
         _iface->poke32(REG_TX_FE_DC_OFFSET_I, i_dc_off);
         _iface->poke32(REG_TX_FE_DC_OFFSET_Q, q_dc_off);
@@ -77,6 +73,9 @@ public:
 
     void populate_subtree(uhd::property_tree::sptr subtree)
     {
+        subtree->create<uhd::meta_range_t>("dc_offset/range")
+            .set(meta_range_t(DC_OFFSET_MIN, DC_OFFSET_MAX))
+        ;
         subtree->create< std::complex<double> >("dc_offset/value")
             .set(DEFAULT_DC_OFFSET_VALUE)
             .set_coercer(boost::bind(&tx_frontend_core_200::set_dc_offset, this, _1))

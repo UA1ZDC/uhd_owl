@@ -1,43 +1,41 @@
 //
 // Copyright 2010-2011,2014-2016 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include <uhd/usrp/gps_ctrl.hpp>
-#include <uhd/utils/msg.hpp>
+
 #include <uhd/utils/log.hpp>
 #include <uhd/exception.hpp>
 #include <uhd/types/sensors.hpp>
 #include <boost/algorithm/string.hpp>
-#include <boost/assign/list_of.hpp>
-#include <boost/cstdint.hpp>
-#include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/thread/thread.hpp>
 #include <boost/tokenizer.hpp>
 #include <boost/format.hpp>
 #include <boost/regex.hpp>
 #include <boost/thread/mutex.hpp>
-
-#include "boost/tuple/tuple.hpp"
-#include "boost/foreach.hpp"
+#include <boost/date_time.hpp>
+#include <boost/tuple/tuple.hpp>
+#include <ctime>
+#include <string>
+#include <thread>
+#include <chrono>
+#include <stdint.h>
 
 using namespace uhd;
-using namespace boost::gregorian;
 using namespace boost::posix_time;
 using namespace boost::algorithm;
-using namespace boost::this_thread;
+
+namespace {
+    constexpr int GPS_COMM_TIMEOUT_MS       = 1300;
+    constexpr int GPS_NMEA_NORMAL_FRESHNESS = 1000;
+    constexpr int GPS_SERVO_FRESHNESS       = 1000;
+    constexpr int GPS_LOCK_FRESHNESS        = 2500;
+    constexpr int GPS_TIMEOUT_DELAY_MS      = 200;
+    constexpr int GPSDO_COMMAND_DELAY_MS    = 200;
+}
 
 /*!
  * A control for GPSDO devices
@@ -92,7 +90,7 @@ private:
                     sentences[which].get<2>() = true;
                 }
             } catch(std::exception &e) {
-                UHD_MSG(warning) << "get_sentence: " << e.what();
+                UHD_LOGGER_DEBUG("GPS") << "get_sentence: " << e.what();
             }
 
             if (not sentence.empty() or now > exit_time)
@@ -100,7 +98,7 @@ private:
                 break;
             }
 
-            sleep(boost::posix_time::milliseconds(1));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
             now = boost::get_system_time();
         }
 
@@ -118,8 +116,8 @@ private:
             return false;
 
         std::stringstream ss;
-        boost::uint32_t string_crc;
-        boost::uint32_t calculated_crc = 0;
+        uint32_t string_crc;
+        uint32_t calculated_crc = 0;
 
         // get crc from string
         ss << std::hex << nmea.substr(nmea.length()-2, 2);
@@ -134,11 +132,11 @@ private:
     }
 
   void update_cache() {
-    if(not gps_detected() or (_gps_type != GPS_TYPE_INTERNAL_GPSDO)) {
+    if(not gps_detected()) {
         return;
     }
 
-    const std::list<std::string> keys = boost::assign::list_of("GPGGA")("GPRMC")("SERVO");
+    const std::list<std::string> keys{"GPGGA", "GPRMC", "SERVO"};
     static const boost::regex servo_regex("^\\d\\d-\\d\\d-\\d\\d.*$");
     static const boost::regex gp_msg_regex("^\\$GP.*,\\*[0-9A-F]{2}$");
     std::map<std::string,std::string> msgs;
@@ -159,7 +157,7 @@ private:
 
         if (msg.length() < 6)
         {
-            UHD_LOGV(regularly) << __FUNCTION__ << ": Short GPSDO string: " << msg << std::endl;
+            UHD_LOGGER_WARNING("GPS") << __FUNCTION__ << ": Short GPSDO string: " << msg ;
             continue;
         }
 
@@ -174,14 +172,14 @@ private:
         }
         else
         {
-            UHD_LOGV(regularly) << __FUNCTION__ << ": Malformed GPSDO string: " << msg << std::endl;
+            UHD_LOGGER_WARNING("GPS") << __FUNCTION__ << ": Malformed GPSDO string: " << msg ;
         }
     }
 
     boost::system_time time = boost::get_system_time();
 
     // Update sentences with newly read data
-    BOOST_FOREACH(std::string key, keys)
+    for(std::string key:  keys)
     {
         if (not msgs[key].empty())
         {
@@ -203,13 +201,15 @@ public:
 
     //first we look for an internal GPSDO
     _flush(); //get whatever junk is in the rx buffer right now, and throw it away
+
     _send("*IDN?\r\n"); //request identity from the GPSDO
 
     //then we loop until we either timeout, or until we get a response that indicates we're a JL device
-    const boost::system_time comm_timeout = boost::get_system_time() + milliseconds(GPS_COMM_TIMEOUT_MS);
+    //maximum response time was measured at ~320ms, so we set the timeout at 650ms
+    const boost::system_time comm_timeout = boost::get_system_time() + milliseconds(650);
     while(boost::get_system_time() < comm_timeout) {
       reply = _recv();
-      //known devices are JL "FireFly" and "LC_XO"
+      //known devices are JL "FireFly", "GPSTCXO", and "LC_XO"
       if(reply.find("FireFly") != std::string::npos
          or reply.find("LC_XO") != std::string::npos
          or reply.find("GPSTCXO") != std::string::npos) {
@@ -218,31 +218,39 @@ public:
       } else if(reply.substr(0, 3) == "$GP") {
           i_heard_some_nmea = true; //but keep looking
       } else if(not reply.empty()) {
-          i_heard_something_weird = true; //probably wrong baud rate
+          // wrong baud rate or firmware still initializing
+          i_heard_something_weird = true;
+          _send("*IDN?\r\n");   //re-send identity request
+      } else {
+          // _recv timed out
+          _send("*IDN?\r\n");   //re-send identity request
       }
     }
 
-    if((i_heard_some_nmea) && (_gps_type != GPS_TYPE_INTERNAL_GPSDO)) _gps_type = GPS_TYPE_GENERIC_NMEA;
-
-    if((_gps_type == GPS_TYPE_NONE) && i_heard_something_weird) {
-      UHD_MSG(error) << "GPS invalid reply \"" << reply << "\", assuming none available" << std::endl;
+    if (_gps_type == GPS_TYPE_NONE)
+    {
+        if(i_heard_some_nmea) {
+            _gps_type = GPS_TYPE_GENERIC_NMEA;
+        } else if(i_heard_something_weird) {
+            UHD_LOGGER_ERROR("GPS") << "GPS invalid reply \"" << reply << "\", assuming none available";
+        }
     }
 
     switch(_gps_type) {
     case GPS_TYPE_INTERNAL_GPSDO:
       erase_all(reply, "\r");
       erase_all(reply, "\n");
-      UHD_MSG(status) << "Found an internal GPSDO: " << reply << std::endl;
+      UHD_LOGGER_INFO("GPS") << "Found an internal GPSDO: " << reply;
       init_gpsdo();
       break;
 
     case GPS_TYPE_GENERIC_NMEA:
-      UHD_MSG(status) << "Found a generic NMEA GPS device" << std::endl;
+        UHD_LOGGER_INFO("GPS") << "Found a generic NMEA GPS device";
       break;
 
     case GPS_TYPE_NONE:
     default:
-      UHD_MSG(status) << "No GPSDO found" << std::endl;
+        UHD_LOGGER_INFO("GPS") << "No GPSDO found";
       break;
 
     }
@@ -257,13 +265,14 @@ public:
 
   //return a list of supported sensors
   std::vector<std::string> get_sensors(void) {
-    std::vector<std::string> ret = boost::assign::list_of
-        ("gps_gpgga")
-        ("gps_gprmc")
-        ("gps_time")
-        ("gps_locked")
-        ("gps_servo");
-    return ret;
+      std::vector<std::string> ret{
+          "gps_gpgga",
+          "gps_gprmc",
+          "gps_time",
+          "gps_locked",
+          "gps_servo"
+      };
+      return ret;
   }
 
   uhd::sensor_value_t get_sensor(std::string key) {
@@ -293,22 +302,24 @@ public:
 
 private:
   void init_gpsdo(void) {
-    //issue some setup stuff so it spits out the appropriate data
-    //none of these should issue replies so we don't bother looking for them
-    //we have to sleep between commands because the JL device, despite not acking, takes considerable time to process each command.
-     sleep(milliseconds(GPSDO_COMMAND_DELAY_MS));
-    _send("SYST:COMM:SER:ECHO OFF\r\n");
-     sleep(milliseconds(GPSDO_COMMAND_DELAY_MS));
-    _send("SYST:COMM:SER:PRO OFF\r\n");
-     sleep(milliseconds(GPSDO_COMMAND_DELAY_MS));
-    _send("GPS:GPGGA 1\r\n");
-     sleep(milliseconds(GPSDO_COMMAND_DELAY_MS));
-    _send("GPS:GGAST 0\r\n");
-     sleep(milliseconds(GPSDO_COMMAND_DELAY_MS));
-    _send("GPS:GPRMC 1\r\n");
-     sleep(milliseconds(GPSDO_COMMAND_DELAY_MS));
-    _send("SERV:TRAC 1\r\n");
-     sleep(milliseconds(GPSDO_COMMAND_DELAY_MS));
+      //issue some setup stuff so it spits out the appropriate data
+      //none of these should issue replies so we don't bother looking for them
+      //we have to sleep between commands because the JL device, despite not
+      //acking, takes considerable time to process each command.
+      const std::vector<std::string> init_cmds = {
+          "SYST:COMM:SER:ECHO OFF\r\n",
+          "SYST:COMM:SER:PRO OFF\r\n",
+          "GPS:GPGGA 1\r\n",
+          "GPS:GGAST 0\r\n",
+          "GPS:GPRMC 1\r\n",
+          "SERV:TRAC 1\r\n"
+      };
+
+      for (const auto& cmd : init_cmds) {
+          _send(cmd);
+          std::this_thread::sleep_for(
+                std::chrono::milliseconds(GPSDO_COMMAND_DELAY_MS));
+      }
   }
 
   //helper function to retrieve a field from an NMEA sentence
@@ -339,29 +350,29 @@ private:
                 throw uhd::value_error(str(boost::format("Invalid response \"%s\"") % reply));
             }
 
-            //just trust me on this one
-            gps_time = ptime( date(
-                             greg_year(boost::lexical_cast<int>(datestr.substr(4, 2)) + 2000),
-                             greg_month(boost::lexical_cast<int>(datestr.substr(2, 2))),
-                             greg_day(boost::lexical_cast<int>(datestr.substr(0, 2)))
-                           ),
-                          hours(  boost::lexical_cast<int>(timestr.substr(0, 2)))
-                        + minutes(boost::lexical_cast<int>(timestr.substr(2, 2)))
-                        + seconds(boost::lexical_cast<int>(timestr.substr(4, 2)))
-                     );
+            struct tm raw_date;
+            raw_date.tm_year = std::stoi(datestr.substr(4, 2)) + 2000 - 1900; // years since 1900
+            raw_date.tm_mon = std::stoi(datestr.substr(2, 2)) - 1; // months since january (0-11)
+            raw_date.tm_mday = std::stoi(datestr.substr(0, 2)); // dom (1-31)
+            raw_date.tm_hour = std::stoi(timestr.substr(0, 2));
+            raw_date.tm_min = std::stoi(timestr.substr(2, 2));
+            raw_date.tm_sec = std::stoi(timestr.substr(4,2));
+            gps_time = boost::posix_time::ptime_from_tm(raw_date);
+
+            UHD_LOG_TRACE("GPS", "GPS time: " + boost::posix_time::to_simple_string(gps_time));
             return gps_time;
 
         } catch(std::exception &e) {
-            UHD_MSG(warning) << "get_time: " << e.what();
+            UHD_LOGGER_DEBUG("GPS") << "get_time: " << e.what();
             error_cnt++;
         }
     }
-    throw uhd::value_error("Timeout after no valid message found");
+    throw uhd::value_error("get_time: Timeout after no valid message found");
 
     return gps_time; //keep gcc from complaining
   }
 
-  time_t get_epoch_time(void) {
+  int64_t get_epoch_time(void) {
       return (get_time() - from_time_t(0)).total_seconds();
   }
 
@@ -379,7 +390,7 @@ private:
             else
                 return (get_token(reply, 6) != "0");
         } catch(std::exception &e) {
-            UHD_MSG(warning) << "locked: " << e.what();
+            UHD_LOGGER_DEBUG("GPS") << "locked: " << e.what();
             error_cnt++;
         }
     }
@@ -408,12 +419,6 @@ private:
     GPS_TYPE_NONE
   } _gps_type;
 
-  static const int GPS_COMM_TIMEOUT_MS = 1300;
-  static const int GPS_NMEA_NORMAL_FRESHNESS = 1000;
-  static const int GPS_SERVO_FRESHNESS = 1000;
-  static const int GPS_LOCK_FRESHNESS = 2500;
-  static const int GPS_TIMEOUT_DELAY_MS = 200;
-  static const int GPSDO_COMMAND_DELAY_MS = 200;
 };
 
 /***********************************************************************

@@ -1,18 +1,8 @@
 #
 # Copyright 2013 Ettus Research LLC
+# Copyright 2018 Ettus Research, a National Instruments Company
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-License-Identifier: GPL-3.0
 #
 
 ########################################################################
@@ -22,7 +12,7 @@
 ########################################################################
 # Conditionally configure the N230 support
 ########################################################################
-IF(ENABLE_N230)
+if(ENABLE_N230)
     LIBUHD_APPEND_SOURCES(
         ${CMAKE_CURRENT_SOURCE_DIR}/n230_cores.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/n230_impl.cpp
@@ -33,5 +23,6 @@ IF(ENABLE_N230)
         ${CMAKE_CURRENT_SOURCE_DIR}/n230_frontend_ctrl.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/n230_uart.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/n230_image_loader.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/n230_fw_ctrl_iface.cpp
    )
-ENDIF(ENABLE_N230)
+endif(ENABLE_N230)

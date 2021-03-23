@@ -1,18 +1,8 @@
 //
 // Copyright 2014 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 // Implements templated functions from node_ctrl_base.hpp
@@ -21,7 +11,7 @@
 #define INCLUDED_LIBUHD_NODE_CTRL_BASE_IPP
 
 #include <uhd/exception.hpp>
-#include <uhd/utils/msg.hpp>
+
 #include <boost/shared_ptr.hpp>
 #include <vector>
 
@@ -29,7 +19,7 @@ namespace uhd {
     namespace rfnoc {
 
     template <typename T, bool downstream>
-    std::vector< boost::shared_ptr<T> > node_ctrl_base::_find_child_node()
+    std::vector< boost::shared_ptr<T> > node_ctrl_base::_find_child_node(bool active_only)
     {
         typedef boost::shared_ptr<T> T_sptr;
         static const size_t MAX_ITER = 20;
@@ -37,26 +27,48 @@ namespace uhd {
         // List of return values:
         std::set< T_sptr > results_s;
         // To avoid cycles:
-        std::set< sptr > explored;
+        std::set < sptr > explored;
         // Initialize our search queue with ourself:
-        std::set< sptr > search_q;
-        search_q.insert(shared_from_this());
-        std::set< sptr > next_q;
+        std::set < node_map_pair_t > search_q;
+        // FIXME:  Port is initialized to ANY_PORT, but it should really be
+        // passed in by the caller.
+        search_q.insert(node_map_pair_t(ANY_PORT, shared_from_this()));
+        std::set < node_map_pair_t > next_q;
 
         while (iters++ < MAX_ITER) {
             next_q.clear();
-            BOOST_FOREACH(const sptr &this_node, search_q) {
-                // Add this node to the list of explored nodes
-                explored.insert(this_node);
-                // Create set of all child nodes of this_node that are not in explored:
-                std::set< sptr > next_nodes;
+            BOOST_FOREACH(const node_map_pair_t node_pair, search_q) {
+                sptr node = node_pair.second.lock();
+                if (not node)
                 {
-                    node_map_t all_next_nodes = downstream ? this_node->list_downstream_nodes() : this_node->list_upstream_nodes();
+                    continue;
+                }
+                size_t our_port = node_pair.first;
+                // Add this node to the list of explored nodes
+                explored.insert(node);
+                // Create set of all child nodes of this_node that are not in explored:
+                std::set< node_map_pair_t > next_nodes;
+                {
+                    node_map_t all_next_nodes = downstream ?
+                        node->list_downstream_nodes() :
+                        node->list_upstream_nodes();
                     for (
                         node_map_t::iterator it = all_next_nodes.begin();
                         it != all_next_nodes.end();
                         ++it
                     ) {
+                        size_t connected_port = it->first;
+                        // If port is given, limit traversal to only that port.
+                        if (our_port != ANY_PORT and our_port != connected_port)
+                        {
+                            continue;
+                        }
+                        if (active_only
+                            and not (downstream ?
+                                _tx_streamer_active[connected_port] :
+                                _rx_streamer_active[connected_port] )) {
+                            continue;
+                        }
                         sptr one_next_node = it->second.lock();
                         if (not one_next_node or explored.count(one_next_node)) {
                             continue;
@@ -65,7 +77,23 @@ namespace uhd {
                         if (next_node_sptr) {
                             results_s.insert(next_node_sptr);
                         } else {
-                            next_nodes.insert(one_next_node);
+                            size_t next_port = ANY_PORT;
+                            // FIXME:  Need proper mapping from input port
+                            // to output port.
+                            // The code below assumes that blocks with the same
+                            // number of connected upstream and downstream nodes
+                            // map each input port directly to the same output
+                            // port.  This limits the graph traversal to prevent
+                            // finding nodes that are not part of this chain.
+                            if (one_next_node->_num_input_ports
+                                and (one_next_node->_num_input_ports ==
+                                one_next_node->_num_output_ports))
+                            {
+                                next_port = (downstream ?
+                                    node->get_downstream_port(connected_port) :
+                                    node->get_upstream_port(connected_port));
+                            }
+                            next_nodes.insert(node_map_pair_t(next_port, it->second));
                         }
                     }
                 }

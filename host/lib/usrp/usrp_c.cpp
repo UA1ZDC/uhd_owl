@@ -1,18 +1,8 @@
 /*
  * Copyright 2015-2016 Ettus Research LLC
+ * Copyright 2018 Ettus Research, a National Instruments Company
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 /* C-Interface for multi_usrp */
@@ -23,7 +13,6 @@
 #include <uhd/error.h>
 #include <uhd/usrp/usrp.h>
 
-#include <boost/foreach.hpp>
 #include <boost/thread/mutex.hpp>
 
 #include <string.h>
@@ -66,21 +55,19 @@ struct uhd_usrp {
 
 struct uhd_tx_streamer {
     size_t usrp_index;
-    size_t streamer_index;
+    uhd::tx_streamer::sptr streamer;
     std::string last_error;
 };
 
 struct uhd_rx_streamer {
     size_t usrp_index;
-    size_t streamer_index;
+    uhd::rx_streamer::sptr streamer;
     std::string last_error;
 };
 
 /* Not public: We use this for our internal registry */
 struct usrp_ptr {
     uhd::usrp::multi_usrp::sptr ptr;
-    std::vector< uhd::rx_streamer::sptr > rx_streamers;
-    std::vector< uhd::tx_streamer::sptr > tx_streamers;
     static size_t usrp_counter;
 };
 size_t usrp_ptr::usrp_counter = 0;
@@ -91,8 +78,6 @@ typedef std::map<size_t, usrp_ptr> usrp_ptrs;
 UHD_SINGLETON_FCN(usrp_ptrs, get_usrp_ptrs);
 /* Shortcut for accessing the underlying USRP sptr from a uhd_usrp_handle* */
 #define USRP(h_ptr) (get_usrp_ptrs()[h_ptr->usrp_index].ptr)
-#define RX_STREAMER(h_ptr) (get_usrp_ptrs()[h_ptr->usrp_index].rx_streamers[h_ptr->streamer_index])
-#define TX_STREAMER(h_ptr) (get_usrp_ptrs()[h_ptr->usrp_index].tx_streamers[h_ptr->streamer_index])
 
 /****************************************************************************
  * RX Streamer
@@ -100,7 +85,7 @@ UHD_SINGLETON_FCN(usrp_ptrs, get_usrp_ptrs);
 static boost::mutex _rx_streamer_make_mutex;
 uhd_error uhd_rx_streamer_make(uhd_rx_streamer_handle* h){
     UHD_SAFE_C(
-        boost::mutex::scoped_lock(_rx_streamer_make_mutex);
+        boost::mutex::scoped_lock lock(_rx_streamer_make_mutex);
         (*h) = new uhd_rx_streamer;
     )
 }
@@ -117,14 +102,14 @@ uhd_error uhd_rx_streamer_free(uhd_rx_streamer_handle* h){
 uhd_error uhd_rx_streamer_num_channels(uhd_rx_streamer_handle h,
                                        size_t *num_channels_out){
     UHD_SAFE_C_SAVE_ERROR(h,
-        *num_channels_out = RX_STREAMER(h)->get_num_channels();
+        *num_channels_out = h->streamer->get_num_channels();
     )
 }
 
 uhd_error uhd_rx_streamer_max_num_samps(uhd_rx_streamer_handle h,
                                         size_t *max_num_samps_out){
     UHD_SAFE_C_SAVE_ERROR(h,
-        *max_num_samps_out = RX_STREAMER(h)->get_max_num_samps();
+        *max_num_samps_out = h->streamer->get_max_num_samps();
     )
 }
 
@@ -138,8 +123,8 @@ uhd_error uhd_rx_streamer_recv(
     size_t *items_recvd
 ){
     UHD_SAFE_C_SAVE_ERROR(h,
-        uhd::rx_streamer::buffs_type buffs_cpp(buffs, RX_STREAMER(h)->get_num_channels());
-        *items_recvd = RX_STREAMER(h)->recv(buffs_cpp, samps_per_buff, (*md)->rx_metadata_cpp, timeout, one_packet);
+        uhd::rx_streamer::buffs_type buffs_cpp(buffs, h->streamer->get_num_channels());
+        *items_recvd = h->streamer->recv(buffs_cpp, samps_per_buff, (*md)->rx_metadata_cpp, timeout, one_packet);
     )
 }
 
@@ -148,7 +133,7 @@ uhd_error uhd_rx_streamer_issue_stream_cmd(
     const uhd_stream_cmd_t *stream_cmd
 ){
     UHD_SAFE_C_SAVE_ERROR(h,
-        RX_STREAMER(h)->issue_stream_cmd(stream_cmd_c_to_cpp(stream_cmd));
+            h->streamer->issue_stream_cmd(stream_cmd_c_to_cpp(stream_cmd));
     )
 }
 
@@ -157,7 +142,7 @@ uhd_error uhd_rx_streamer_last_error(
     char* error_out,
     size_t strbuffer_len
 ){
-    UHD_SAFE_C_SAVE_ERROR(h,
+    UHD_SAFE_C(
         memset(error_out, '\0', strbuffer_len);
         strncpy(error_out, h->last_error.c_str(), strbuffer_len);
     )
@@ -192,7 +177,7 @@ uhd_error uhd_tx_streamer_num_channels(
     size_t *num_channels_out
 ){
     UHD_SAFE_C_SAVE_ERROR(h,
-        *num_channels_out = TX_STREAMER(h)->get_num_channels();
+        *num_channels_out = h->streamer->get_num_channels();
     )
 }
 
@@ -201,7 +186,7 @@ uhd_error uhd_tx_streamer_max_num_samps(
     size_t *max_num_samps_out
 ){
     UHD_SAFE_C_SAVE_ERROR(h,
-        *max_num_samps_out = TX_STREAMER(h)->get_max_num_samps();
+        *max_num_samps_out = h->streamer->get_max_num_samps();
     )
 }
 
@@ -214,8 +199,8 @@ uhd_error uhd_tx_streamer_send(
     size_t *items_sent
 ){
     UHD_SAFE_C_SAVE_ERROR(h,
-        uhd::tx_streamer::buffs_type buffs_cpp(buffs, TX_STREAMER(h)->get_num_channels());
-        *items_sent = TX_STREAMER(h)->send(
+        uhd::tx_streamer::buffs_type buffs_cpp(buffs, h->streamer->get_num_channels());
+        *items_sent = h->streamer->send(
             buffs_cpp,
             samps_per_buff,
             (*md)->tx_metadata_cpp,
@@ -231,7 +216,7 @@ uhd_error uhd_tx_streamer_recv_async_msg(
     bool *valid
 ){
     UHD_SAFE_C_SAVE_ERROR(h,
-        *valid = TX_STREAMER(h)->recv_async_msg((*md)->async_metadata_cpp, timeout);
+        *valid = h->streamer->recv_async_msg((*md)->async_metadata_cpp, timeout);
     )
 }
 
@@ -259,7 +244,7 @@ uhd_error uhd_usrp_find(
 
         uhd::device_addrs_t devs = uhd::device::find(std::string(args), uhd::device::USRP);
         (*strings_out)->string_vector_cpp.clear();
-        BOOST_FOREACH(const uhd::device_addr_t &dev, devs){
+        for(const uhd::device_addr_t &dev:  devs){
             (*strings_out)->string_vector_cpp.push_back(dev.to_string());
         }
     )
@@ -324,19 +309,17 @@ uhd_error uhd_usrp_get_rx_stream(
     uhd_stream_args_t *stream_args,
     uhd_rx_streamer_handle h_s
 ){
-    UHD_SAFE_C(
+    UHD_SAFE_C_SAVE_ERROR(h_s,
         boost::mutex::scoped_lock lock(_usrp_get_rx_stream_mutex);
 
         if(!get_usrp_ptrs().count(h_u->usrp_index)){
+            h_s->last_error = "Streamer's device is invalid or expired.";
             return UHD_ERROR_INVALID_DEVICE;
         }
 
         usrp_ptr &usrp = get_usrp_ptrs()[h_u->usrp_index];
-        usrp.rx_streamers.push_back(
-            usrp.ptr->get_rx_stream(stream_args_c_to_cpp(stream_args))
-        );
+        h_s->streamer = usrp.ptr->get_rx_stream(stream_args_c_to_cpp(stream_args));
         h_s->usrp_index     = h_u->usrp_index;
-        h_s->streamer_index = usrp.rx_streamers.size() - 1;
     )
 }
 
@@ -346,19 +329,17 @@ uhd_error uhd_usrp_get_tx_stream(
     uhd_stream_args_t *stream_args,
     uhd_tx_streamer_handle h_s
 ){
-    UHD_SAFE_C(
+    UHD_SAFE_C_SAVE_ERROR(h_s,
         boost::mutex::scoped_lock lock(_usrp_get_tx_stream_mutex);
 
         if(!get_usrp_ptrs().count(h_u->usrp_index)){
+            h_s->last_error = "Streamer's device is invalid or expired.";
             return UHD_ERROR_INVALID_DEVICE;
         }
 
         usrp_ptr &usrp = get_usrp_ptrs()[h_u->usrp_index];
-        usrp.tx_streamers.push_back(
-            usrp.ptr->get_tx_stream(stream_args_c_to_cpp(stream_args))
-        );
+        h_s->streamer = usrp.ptr->get_tx_stream(stream_args_c_to_cpp(stream_args));
         h_s->usrp_index     = h_u->usrp_index;
-        h_s->streamer_index = usrp.tx_streamers.size() - 1;
     )
 }
 
@@ -378,6 +359,7 @@ uhd_error uhd_usrp_get_rx_info(
         uhd::dict<std::string, std::string> rx_info = USRP(h)->get_usrp_rx_info(chan);
 
         COPY_INFO_FIELD(info_out, rx_info, mboard_id);
+        COPY_INFO_FIELD(info_out, rx_info, mboard_name);
         COPY_INFO_FIELD(info_out, rx_info, mboard_serial);
         COPY_INFO_FIELD(info_out, rx_info, rx_id);
         COPY_INFO_FIELD(info_out, rx_info, rx_subdev_name);
@@ -396,6 +378,7 @@ uhd_error uhd_usrp_get_tx_info(
         uhd::dict<std::string, std::string> tx_info = USRP(h)->get_usrp_tx_info(chan);
 
         COPY_INFO_FIELD(info_out, tx_info, mboard_id);
+        COPY_INFO_FIELD(info_out, tx_info, mboard_name);
         COPY_INFO_FIELD(info_out, tx_info, mboard_serial);
         COPY_INFO_FIELD(info_out, tx_info, tx_id);
         COPY_INFO_FIELD(info_out, tx_info, tx_subdev_name);
@@ -452,7 +435,7 @@ uhd_error uhd_usrp_get_mboard_name(
 uhd_error uhd_usrp_get_time_now(
     uhd_usrp_handle h,
     size_t mboard,
-    time_t *full_secs_out,
+    int64_t *full_secs_out,
     double *frac_secs_out
 ){
     UHD_SAFE_C_SAVE_ERROR(h,
@@ -465,7 +448,7 @@ uhd_error uhd_usrp_get_time_now(
 uhd_error uhd_usrp_get_time_last_pps(
     uhd_usrp_handle h,
     size_t mboard,
-    time_t *full_secs_out,
+    int64_t *full_secs_out,
     double *frac_secs_out
 ){
     UHD_SAFE_C_SAVE_ERROR(h,
@@ -477,7 +460,7 @@ uhd_error uhd_usrp_get_time_last_pps(
 
 uhd_error uhd_usrp_set_time_now(
     uhd_usrp_handle h,
-    time_t full_secs,
+    int64_t full_secs,
     double frac_secs,
     size_t mboard
 ){
@@ -489,7 +472,7 @@ uhd_error uhd_usrp_set_time_now(
 
 uhd_error uhd_usrp_set_time_next_pps(
     uhd_usrp_handle h,
-    time_t full_secs,
+    int64_t full_secs,
     double frac_secs,
     size_t mboard
 ){
@@ -501,7 +484,7 @@ uhd_error uhd_usrp_set_time_next_pps(
 
 uhd_error uhd_usrp_set_time_unknown_pps(
     uhd_usrp_handle h,
-    time_t full_secs,
+    int64_t full_secs,
     double frac_secs
 ){
     UHD_SAFE_C_SAVE_ERROR(h,
@@ -522,7 +505,7 @@ uhd_error uhd_usrp_get_time_synchronized(
 
 uhd_error uhd_usrp_set_command_time(
     uhd_usrp_handle h,
-    time_t full_secs,
+    int64_t full_secs,
     double frac_secs,
     size_t mboard
 ){
@@ -610,6 +593,16 @@ uhd_error uhd_usrp_set_clock_source_out(
 ){
     UHD_SAFE_C_SAVE_ERROR(h,
         USRP(h)->set_clock_source_out(enb, mboard);
+    )
+}
+
+uhd_error uhd_usrp_set_time_source_out(
+    uhd_usrp_handle h,
+    bool enb,
+    size_t mboard
+){
+    UHD_SAFE_C_SAVE_ERROR(h,
+        USRP(h)->set_time_source_out(enb, mboard);
     )
 }
 
@@ -840,10 +833,10 @@ uhd_error uhd_usrp_get_fe_rx_freq_range(
 UHD_API uhd_error uhd_usrp_get_rx_lo_names(
     uhd_usrp_handle h,
     size_t chan,
-    uhd_string_vector_handle rx_lo_names_out
+    uhd_string_vector_handle *rx_lo_names_out
 ){
     UHD_SAFE_C_SAVE_ERROR(h,
-        rx_lo_names_out->string_vector_cpp = USRP(h)->get_rx_lo_names(chan);
+        (*rx_lo_names_out)->string_vector_cpp = USRP(h)->get_rx_lo_names(chan);
     )
 }
 
@@ -874,10 +867,10 @@ UHD_API uhd_error uhd_usrp_get_rx_lo_sources(
     uhd_usrp_handle h,
     const char* name,
     size_t chan,
-    uhd_string_vector_handle rx_lo_sources_out
+    uhd_string_vector_handle *rx_lo_sources_out
 ){
     UHD_SAFE_C_SAVE_ERROR(h,
-        rx_lo_sources_out->string_vector_cpp = USRP(h)->get_rx_lo_sources(name, chan);
+        (*rx_lo_sources_out)->string_vector_cpp = USRP(h)->get_rx_lo_sources(name, chan);
     )
 }
 
@@ -1234,6 +1227,95 @@ uhd_error uhd_usrp_get_fe_tx_freq_range(
     )
 }
 
+UHD_API uhd_error uhd_usrp_get_tx_lo_names(
+    uhd_usrp_handle h,
+    size_t chan,
+    uhd_string_vector_handle *tx_lo_names_out
+){
+    UHD_SAFE_C_SAVE_ERROR(h,
+        (*tx_lo_names_out)->string_vector_cpp = USRP(h)->get_tx_lo_names(chan);
+    )
+}
+
+UHD_API uhd_error uhd_usrp_set_tx_lo_source(
+    uhd_usrp_handle h,
+    const char* src,
+    const char* name,
+    size_t chan
+){
+    UHD_SAFE_C_SAVE_ERROR(h,
+        USRP(h)->set_tx_lo_source(src, name, chan);
+    )
+}
+
+UHD_API uhd_error uhd_usrp_get_tx_lo_source(
+    uhd_usrp_handle h,
+    const char* name,
+    size_t chan,
+    char* tx_lo_source_out,
+    size_t strbuffer_len
+){
+    UHD_SAFE_C_SAVE_ERROR(h,
+        strncpy(tx_lo_source_out, USRP(h)->get_tx_lo_source(name, chan).c_str(), strbuffer_len);
+    )
+}
+
+UHD_API uhd_error uhd_usrp_get_tx_lo_sources(
+    uhd_usrp_handle h,
+    const char* name,
+    size_t chan,
+    uhd_string_vector_handle *tx_lo_sources_out
+){
+    UHD_SAFE_C_SAVE_ERROR(h,
+        (*tx_lo_sources_out)->string_vector_cpp = USRP(h)->get_tx_lo_sources(name, chan);
+    )
+}
+
+UHD_API uhd_error uhd_usrp_set_tx_lo_export_enabled(
+    uhd_usrp_handle h,
+    bool enabled,
+    const char* name,
+    size_t chan
+){
+    UHD_SAFE_C_SAVE_ERROR(h,
+        USRP(h)->set_tx_lo_export_enabled(enabled, name, chan);
+    )
+}
+
+UHD_API uhd_error uhd_usrp_get_tx_lo_export_enabled(
+    uhd_usrp_handle h,
+    const char* name,
+    size_t chan,
+    bool* result_out
+) {
+    UHD_SAFE_C_SAVE_ERROR(h,
+        *result_out = USRP(h)->get_tx_lo_export_enabled(name, chan);
+    )
+}
+
+UHD_API uhd_error uhd_usrp_set_tx_lo_freq(
+    uhd_usrp_handle h,
+    double freq,
+    const char* name,
+    size_t chan,
+    double* coerced_freq_out
+){
+    UHD_SAFE_C_SAVE_ERROR(h,
+        *coerced_freq_out = USRP(h)->set_tx_lo_freq(freq, name, chan);
+    )
+}
+
+UHD_API uhd_error uhd_usrp_get_tx_lo_freq(
+    uhd_usrp_handle h,
+    const char* name,
+    size_t chan,
+    double* tx_lo_freq_out
+){
+    UHD_SAFE_C_SAVE_ERROR(h,
+        *tx_lo_freq_out = USRP(h)->get_tx_lo_freq(name, chan);
+    )
+}
+
 uhd_error uhd_usrp_set_tx_gain(
     uhd_usrp_handle h,
     double gain,
@@ -1393,26 +1475,6 @@ uhd_error uhd_usrp_get_tx_sensor_names(
     )
 }
 
-uhd_error uhd_usrp_set_tx_dc_offset_enabled(
-    uhd_usrp_handle h,
-    bool enb,
-    size_t chan
-){
-    UHD_SAFE_C_SAVE_ERROR(h,
-        USRP(h)->set_tx_dc_offset(enb, chan);
-    )
-}
-
-uhd_error uhd_usrp_set_tx_iq_balance_enabled(
-    uhd_usrp_handle h,
-    bool enb,
-    size_t chan
-){
-    UHD_SAFE_C_SAVE_ERROR(h,
-        USRP(h)->set_tx_iq_balance(enb, chan);
-    )
-}
-
 /****************************************************************************
  * GPIO methods
  ***************************************************************************/
@@ -1489,7 +1551,7 @@ uhd_error uhd_usrp_write_register(
     )
 }
 
-uhd_error uhd_usrp_write_register(
+uhd_error uhd_usrp_read_register(
     uhd_usrp_handle h,
     const char* path,
     uint32_t field,

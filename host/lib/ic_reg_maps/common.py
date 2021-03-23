@@ -1,18 +1,8 @@
 #
 # Copyright 2010-2011,2015 Ettus Research LLC
+# Copyright 2018 Ettus Research, a National Instruments Company
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 
 import re
@@ -30,8 +20,8 @@ COMMON_TMPL = """<% import time %>\
 
 #include <uhd/config.hpp>
 #include <uhd/exception.hpp>
-#include <boost/cstdint.hpp>
 #include <set>
+#include <stdint.h>
 
 class ${name}_t{
 public:
@@ -145,7 +135,7 @@ class reg:
         return self._default
     def get_type(self):
         if self.get_enums(): return '%s_t'%self.get_name()
-        return 'boost::uint%d_t'%max(2**math.ceil(math.log(self.get_bit_width(), 2)), 8)
+        return 'uint%d_t'%max(2**math.ceil(math.log(self.get_bit_width(), 2)), 8)
     def get_shift(self): return self._addr_spec[0]
     def get_mask(self): return hex(int('1'*self.get_bit_width(), 2))
     def get_bit_width(self): return self._addr_spec[1] - self._addr_spec[0] + 1
@@ -166,7 +156,7 @@ class mreg:
     def get_regs(self): return self._regs
     def get_bit_width(self): return sum(map(reg.get_bit_width, self._regs))
     def get_type(self):
-        return 'boost::uint%d_t'%max(2**math.ceil(math.log(self.get_bit_width(), 2)), 8)
+        return 'uint%d_t'%max(2**math.ceil(math.log(self.get_bit_width(), 2)), 8)
 
 def generate(name, regs_tmpl, body_tmpl='', file=__file__, append=False):
     #evaluate the regs template and parse each line into a register

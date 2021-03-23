@@ -1,19 +1,9 @@
 #!/usr/bin/env python
 #
 # Copyright 2010-2012 Ettus Research LLC
+# Copyright 2018 Ettus Research, a National Instruments Company
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 
 ########################################################################
@@ -107,13 +97,13 @@ update_registers               0x5A[0]             0
 # Template for methods in the body of the struct
 ########################################################################
 BODY_TMPL="""\
-boost::uint8_t get_reg(boost::uint16_t addr){
-    boost::uint8_t reg = 0;
+uint8_t get_reg(uint16_t addr){
+    uint8_t reg = 0;
     switch(addr){
     % for addr in sorted(set(map(lambda r: r.get_addr(), regs))):
     case ${addr}:
         % for reg in filter(lambda r: r.get_addr() == addr, regs):
-        reg |= (boost::uint32_t(${reg.get_name()}) & ${reg.get_mask()}) << ${reg.get_shift()};
+        reg |= (uint32_t(${reg.get_name()}) & ${reg.get_mask()}) << ${reg.get_shift()};
         % endfor
         break;
     % endfor
@@ -121,12 +111,12 @@ boost::uint8_t get_reg(boost::uint16_t addr){
     return reg;
 }
 
-boost::uint32_t get_write_reg(boost::uint16_t addr){
-    return (boost::uint32_t(addr) << 8) | get_reg(addr);
+uint32_t get_write_reg(uint16_t addr){
+    return (uint32_t(addr) << 8) | get_reg(addr);
 }
 
-boost::uint32_t get_read_reg(boost::uint16_t addr){
-    return (boost::uint32_t(addr) << 8) | (1 << 23);
+uint32_t get_read_reg(uint16_t addr){
+    return (uint32_t(addr) << 8) | (1 << 23);
 }
 """
 

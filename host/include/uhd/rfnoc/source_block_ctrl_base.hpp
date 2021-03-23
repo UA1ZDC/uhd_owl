@@ -1,18 +1,8 @@
 //
 // Copyright 2014 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #ifndef INCLUDED_LIBUHD_RX_BLOCK_CTRL_BASE_HPP
@@ -21,8 +11,7 @@
 #include <uhd/rfnoc/block_ctrl_base.hpp>
 #include <uhd/rfnoc/source_node_ctrl.hpp>
 
-namespace uhd {
-    namespace rfnoc {
+namespace uhd { namespace rfnoc {
 
 /*! \brief Extends block_ctrl_base with receive capabilities.
  *
@@ -32,7 +21,8 @@ namespace uhd {
  * data *from* this block.
  */
 class UHD_RFNOC_API source_block_ctrl_base;
-class source_block_ctrl_base : virtual public block_ctrl_base, virtual public source_node_ctrl
+class source_block_ctrl_base : virtual public block_ctrl_base,
+                               virtual public source_node_ctrl
 {
 public:
     typedef boost::shared_ptr<source_block_ctrl_base> sptr;
@@ -60,8 +50,11 @@ public:
      * See also register_upstream_block().
      *
      * \param stream_cmd The stream command.
+     * \param chan Channel for which this command is meant (data shall be produced on this
+     * channel).
      */
-    virtual void issue_stream_cmd(const uhd::stream_cmd_t &stream_cmd, const size_t chan=0);
+    virtual void issue_stream_cmd(
+        const uhd::stream_cmd_t& stream_cmd, const size_t chan = 0);
 
     /***********************************************************************
      * Stream signatures
@@ -76,7 +69,7 @@ public:
      * \returns The stream signature for port \p block_port
      * \throws uhd::runtime_error if \p block_port is not a valid port
      */
-    stream_sig_t get_output_signature(size_t block_port=0) const;
+    stream_sig_t get_output_signature(size_t block_port = 0) const;
 
     /*! Return a list of valid output ports.
      */
@@ -94,10 +87,7 @@ public:
      * to register SR_NEXT_DST of this blocks settings bus. The value will also
      * have bit 16 set to 1, since some blocks require this to respect this value.
      */
-    virtual void set_destination(
-            boost::uint32_t next_address,
-            size_t output_block_port = 0
-    );
+    virtual void set_destination(uint32_t next_address, size_t output_block_port = 0);
 
     /*! Configure flow control for outgoing streams.
      *
@@ -106,18 +96,39 @@ public:
      *
      * Override this function if your block has port-specific flow control settings.
      *
-     * \param buf_size_pkts The size of the downstream block's input FIFO size in number of packets. Setting
-     *                      this to zero disables flow control. The block will then produce data as fast as it can.
-     *                     \b Warning: This can cause head-of-line blocking, and potentially lock up your device!
-     * \param Specify on which outgoing port this setting is valid.
-     * \param sid The SID for which this is valid. This is meant for cases where the outgoing block port is
-     *            not sufficient to set the flow control, and as such is rarely used.
+     * \param enable_output Enable flow control module's output. If disabled, no packets
+     * will be output regardless of flow control state. \param buf_size_bytes The size of
+     * the downstream block's input FIFO size in number of bytes. Setting this to zero
+     * disables byte based flow control. If both byte based flow control and the packet
+     * limit are set to zero, the block will then produce data as fast as it can. \b
+     * Warning: This can cause head-of-line blocking, and potentially lock up your device!
+     * \param lossless_link The link for the connection is lossless.  Periodic sync
+     * packets will be disabled. \param pkt_limit Limit the maximum number of packets in
+     * flight. Setting this to zero disables packet limiting. Usually kept disabled except
+     * for special case connections (such as DMA) that support only a finite number of
+     * packets in flight. \param block_port Specify on which outgoing port this setting is
+     * valid. \param sid The SID for which this is valid. This is meant for cases where
+     * the outgoing block port is not sufficient to set the flow control, and as such is
+     * rarely used.
      */
-    virtual void configure_flow_control_out(
-            size_t buf_size_pkts,
-            size_t block_port=0,
-            const uhd::sid_t &sid=uhd::sid_t()
-     );
+    virtual void configure_flow_control_out(const bool enable_output,
+        const bool lossless_link,
+        const size_t buf_size_bytes,
+        const size_t pkt_limit  = 0,
+        const size_t block_port = 0,
+        const uhd::sid_t& sid   = uhd::sid_t());
+
+    /*! Return the MTU size on a given block port.
+     *
+     * This is necessary for setting up transports, among other things.
+     *
+     * If the block port is not defined, it will return 0, and not throw.
+     *
+     * \param block_port The block port (0 through 15).
+     *
+     * Returns the MTU in bytes.
+     */
+    size_t get_mtu(size_t block_port = 0) const;
 
 
 protected:
@@ -128,13 +139,10 @@ protected:
      * the port has an output signature.
      */
     virtual size_t _request_output_port(
-            const size_t suggested_port,
-            const uhd::device_addr_t &args
-    ) const;
+        const size_t suggested_port, const uhd::device_addr_t& args) const;
 
 }; /* class source_block_ctrl_base */
 
 }} /* namespace uhd::rfnoc */
 
 #endif /* INCLUDED_LIBUHD_RX_BLOCK_CTRL_BASE_HPP */
-// vim: sw=4 et:

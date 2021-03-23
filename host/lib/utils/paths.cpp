@@ -1,28 +1,18 @@
 //
 // Copyright 2010-2012,2015 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include <uhd/config.hpp>
 #include <uhd/exception.hpp>
 #include <uhd/utils/paths.hpp>
+#include <uhdlib/utils/paths.hpp>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/bind.hpp>
 #include <boost/filesystem.hpp>
-#include <boost/foreach.hpp>
 #include <boost/format.hpp>
 #include <boost/regex.hpp>
 #include <boost/tokenizer.hpp>
@@ -98,7 +88,7 @@ static std::vector<std::string> get_env_paths(const std::string &var_name){
 
     //convert to full filesystem path, filter blank paths
     if (var_value.empty()) return paths;
-    BOOST_FOREACH(const std::string &path_string, path_tokenizer(var_value)){
+    for(const std::string &path_string:  path_tokenizer(var_value)){
         if (path_string.empty()) continue;
         paths.push_back(fs::system_complete(path_string).string());
     }
@@ -107,6 +97,7 @@ static std::vector<std::string> get_env_paths(const std::string &var_name){
 }
 
 #ifndef UHD_PLATFORM_WIN32
+// NOTE: This could be replaced by path_expandvars()
 /*! Expand a tilde character to the $HOME path.
  *
  * The path passed to this function must start with the tilde character in order
@@ -190,7 +181,7 @@ std::vector<fs::path> uhd::get_module_paths(void){
     std::vector<fs::path> paths;
 
     std::vector<std::string> env_paths = get_env_paths("UHD_MODULE_PATH");
-    BOOST_FOREACH(std::string &str_path, env_paths) {
+    for(std::string &str_path:  env_paths) {
         paths.push_back(str_path);
     }
 
@@ -272,7 +263,7 @@ std::string uhd::get_images_dir(const std::string &search_paths) {
     /* We will start by looking for a path indicated by the `UHD_IMAGES_DIR`
      * environment variable. */
     std::vector<std::string> env_paths = get_env_paths("UHD_IMAGES_DIR");
-    BOOST_FOREACH(possible_dir, env_paths) {
+    for(auto possible_dir:  env_paths) {
         if (fs::is_directory(fs::path(possible_dir))) {
                 return possible_dir;
         }
@@ -293,7 +284,7 @@ std::string uhd::get_images_dir(const std::string &search_paths) {
         std::vector<std::string> search_paths_vector;
 
         boost::split(search_paths_vector, _search_paths, boost::is_any_of(",;"));
-        BOOST_FOREACH(std::string& search_path, search_paths_vector) {
+        for(std::string& search_path:  search_paths_vector) {
 
             boost::algorithm::trim(search_path);
             if (search_path.empty()) continue;

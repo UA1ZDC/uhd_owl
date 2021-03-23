@@ -1,34 +1,24 @@
 //
 // Copyright 2011-2013 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #ifndef INCLUDED_UHD_STREAM_HPP
 #define INCLUDED_UHD_STREAM_HPP
 
 #include <uhd/config.hpp>
-#include <uhd/types/metadata.hpp>
 #include <uhd/types/device_addr.hpp>
-#include <uhd/types/stream_cmd.hpp>
+#include <uhd/types/metadata.hpp>
 #include <uhd/types/ref_vector.hpp>
-#include <boost/utility.hpp>
+#include <uhd/types/stream_cmd.hpp>
 #include <boost/shared_ptr.hpp>
-#include <vector>
+#include <boost/utility.hpp>
 #include <string>
+#include <vector>
 
-namespace uhd{
+namespace uhd {
 
 /*!
  * A struct of parameters to construct a streamer.
@@ -41,7 +31,7 @@ namespace uhd{
  * uhd::stream_args_t stream_args("fc32", "sc16");
  * // 2. Set the channel list, we want 3 streamers coming from channels
  * //    0, 1 and 2, in that order:
- * stream_args.channels = boost::assign::list_of(0)(1)(2);
+ * stream_args.channels = {0, 1, 2};
  * // 3. Set optional args:
  * stream_args.args["spp"] = "200"; // 200 samples per packet
  * // Now use these args to create an rx streamer:
@@ -53,14 +43,23 @@ namespace uhd{
  *
  * \b Note: Not all combinations of CPU and OTW format have conversion support.
  * You may however write and register your own conversion routines.
+ *
+ * If you are creating stream args to connect to an RFNoC block, then you might
+ * want to specify block ID and port, too:
+ * \code{.cpp}
+ * stream_args.args["block_id0"] = "0/Radio_0";
+ * stream_args.args["block_id1"] = "0/Radio_1";
+ * stream_args.args["block_id2"] = "0/Radio_1"; // Chan 1 and 2 go to the same radio
+ * stream_args.args["block_port0"] = "0";
+ * stream_args.args["block_port1"] = "0";
+ * stream_args.args["block_port2"] = "1";
+ * \endcode
  */
-struct UHD_API stream_args_t{
-
+struct UHD_API stream_args_t
+{
     //! Convenience constructor for streamer args
-    stream_args_t(
-        const std::string &cpu = "",
-        const std::string &otw = ""
-    ){
+    stream_args_t(const std::string& cpu = "", const std::string& otw = "")
+    {
         cpu_format = cpu;
         otw_format = otw;
     }
@@ -94,12 +93,12 @@ struct UHD_API stream_args_t{
      *  - s16 - R16_1 R16_0
      *  - s8 - R8_3 R8_2 R8_1 R8_0
      *
-     * Setting the OTW ("over-the-wire") format is, in theory, transparent to the application,
-     * but changing this can have some side effects. Using less bits for example (e.g. when going
-     * from `otw_format` `sc16` to `sc8`) will reduce the dynamic range, and increases quantization
-     * noise. On the other hand, it reduces the load on the data link and thus allows more bandwidth
-     * (a USRP N210 can work with 25 MHz bandwidth for 16-Bit complex samples, and 50 MHz for 8-Bit
-     * complex samples).
+     * Setting the OTW ("over-the-wire") format is, in theory, transparent to the
+     * application, but changing this can have some side effects. Using less bits for
+     * example (e.g. when going from `otw_format` `sc16` to `sc8`) will reduce the dynamic
+     * range, and increases quantization noise. On the other hand, it reduces the load on
+     * the data link and thus allows more bandwidth (a USRP N210 can work with 25 MHz
+     * bandwidth for 16-Bit complex samples, and 50 MHz for 8-Bit complex samples).
      */
     std::string otw_format;
 
@@ -112,16 +111,17 @@ struct UHD_API stream_args_t{
      * Set the "fullscale" to scale the samples in the host to the
      * expected input range and/or output range of your application.
      *
-     * - peak: specifies a fractional sample level to calculate scaling with the sc8 wire format.
-     * When using sc8 samples over the wire, the device must scale samples
-     * (both on the host and in the device) to satisfy the dynamic range needs.
-     * The peak value specifies a fraction of the maximum sample level (1.0 = 100%).
-     * Set peak to max_sample_level/full_scale_level to ensure optimum dynamic range.
+     * - peak: specifies a fractional sample level to calculate scaling with the sc8 wire
+     * format. When using sc8 samples over the wire, the device must scale samples (both
+     * on the host and in the device) to satisfy the dynamic range needs. The peak value
+     * specifies a fraction of the maximum sample level (1.0 = 100%). Set peak to
+     * max_sample_level/full_scale_level to ensure optimum dynamic range.
      *
      * - underflow_policy: how the TX DSP should recover from underflow.
      * Possible options are "next_burst" or "next_packet".
-     * In the "next_burst" mode, the DSP drops incoming packets until a new burst is started.
-     * In the "next_packet" mode, the DSP starts transmitting again at the next packet.
+     * In the "next_burst" mode, the DSP drops incoming packets until a new burst is
+     * started. In the "next_packet" mode, the DSP starts transmitting again at the next
+     * packet.
      *
      * - spp: (samples per packet) controls the size of RX packets.
      * When not specified, the packets are always maximum frame size.
@@ -133,19 +133,6 @@ struct UHD_API stream_args_t{
      * The following are not implemented, but are listed for conceptual purposes:
      * - function: magnitude or phase/magnitude
      * - units: numeric units like counts or dBm
-     *
-     * In addition, all the transport-related options explained on \ref page_transport can be set here.
-     * These options can be set either when creating the device (see also \ref config_devaddr),
-     * or when creating the streamer (when the options are given both times, the stream args
-     * take precedence):
-     *
-     * - recv_frame_size
-     * - send_frame_size
-     * - num_recv_frames
-     * - num_send_frames
-     * - ups_per_sec
-     * - ups_per_fifo
-     * - recv_buff_fullness
      *
      * Other options are device-specific:
      * - port, addr: Alternative receiver streamer destination.
@@ -162,9 +149,9 @@ struct UHD_API stream_args_t{
      * of `A:0 B:0`. This means the device has two channels available.
      *
      * Setting `stream_args.channels = (0, 1)` therefore configures MIMO streaming
-     * from both channels. By switching the channel indexes, `stream_args.channels = (1, 0)`,
-     * the channels are switched and the first channel of the USRP is mapped to
-     * the second channel in the application.
+     * from both channels. By switching the channel indexes, `stream_args.channels = (1,
+     * 0)`, the channels are switched and the first channel of the USRP is mapped to the
+     * second channel in the application.
      *
      * If only a single channel is used for streaming, `stream_args.channels = (1,)` would
      * only select a single channel (in this case, the second one). When streaming
@@ -179,7 +166,8 @@ struct UHD_API stream_args_t{
  * It represents the layer between the samples on the host
  * and samples inside the device's receive DSP processing.
  */
-class UHD_API rx_streamer : boost::noncopyable{
+class UHD_API rx_streamer : boost::noncopyable
+{
 public:
     typedef boost::shared_ptr<rx_streamer> sptr;
 
@@ -192,7 +180,7 @@ public:
     virtual size_t get_max_num_samps(void) const = 0;
 
     //! Typedef for a pointer to a single, or a collection of recv buffers
-    typedef ref_vector<void *> buffs_type;
+    typedef ref_vector<void*> buffs_type;
 
     /*!
      * Receive buffers containing samples described by the metadata.
@@ -228,13 +216,11 @@ public:
      * \param one_packet return after the first packet is received
      * \return the number of samples received or 0 on error
      */
-    virtual size_t recv(
-        const buffs_type &buffs,
+    virtual size_t recv(const buffs_type& buffs,
         const size_t nsamps_per_buff,
-        rx_metadata_t &metadata,
-        const double timeout = 0.1,
-        const bool one_packet = false
-    ) = 0;
+        rx_metadata_t& metadata,
+        const double timeout  = 0.1,
+        const bool one_packet = false) = 0;
 
     /*!
      * Issue a stream command to the usrp device.
@@ -247,7 +233,7 @@ public:
      *
      * \param stream_cmd the stream command to issue
      */
-    virtual void issue_stream_cmd(const stream_cmd_t &stream_cmd) = 0;
+    virtual void issue_stream_cmd(const stream_cmd_t& stream_cmd) = 0;
 };
 
 /*!
@@ -255,7 +241,8 @@ public:
  * It represents the layer between the samples on the host
  * and samples inside the device's transmit DSP processing.
  */
-class UHD_API tx_streamer : boost::noncopyable{
+class UHD_API tx_streamer : boost::noncopyable
+{
 public:
     typedef boost::shared_ptr<tx_streamer> sptr;
 
@@ -268,7 +255,7 @@ public:
     virtual size_t get_max_num_samps(void) const = 0;
 
     //! Typedef for a pointer to a single, or a collection of send buffers
-    typedef ref_vector<const void *> buffs_type;
+    typedef ref_vector<const void*> buffs_type;
 
     /*!
      * Send buffers containing samples described by the metadata.
@@ -291,12 +278,10 @@ public:
      * \param timeout the timeout in seconds to wait on a packet
      * \return the number of samples sent
      */
-    virtual size_t send(
-        const buffs_type &buffs,
+    virtual size_t send(const buffs_type& buffs,
         const size_t nsamps_per_buff,
-        const tx_metadata_t &metadata,
-        const double timeout = 0.1
-    ) = 0;
+        const tx_metadata_t& metadata,
+        const double timeout = 0.1) = 0;
 
     /*!
      * Receive and asynchronous message from this TX stream.
@@ -305,10 +290,9 @@ public:
      * \return true when the async_metadata is valid, false for timeout
      */
     virtual bool recv_async_msg(
-        async_metadata_t &async_metadata, double timeout = 0.1
-    ) = 0;
+        async_metadata_t& async_metadata, double timeout = 0.1) = 0;
 };
 
-} //namespace uhd
+} // namespace uhd
 
 #endif /* INCLUDED_UHD_STREAM_HPP */

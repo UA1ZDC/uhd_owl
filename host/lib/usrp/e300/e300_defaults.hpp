@@ -1,18 +1,8 @@
 //
 // Copyright 2014 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #ifndef INCLUDED_E300_DEFAULTS_HPP
@@ -48,6 +38,10 @@ static const size_t MAX_NET_TX_DATA_FRAME_SIZE = 1200;
 static const size_t MAX_AXI_RX_DATA_FRAME_SIZE = 4096;
 static const size_t MAX_AXI_TX_DATA_FRAME_SIZE = 4096;
 
+static const size_t MAX_DMA_CHANNEL_PAIRS = 16;
+
+static const double AD9361_SPI_RATE = 8e6;
+
 class e300_ad9361_client_t : public ad9361_params {
 public:
     ~e300_ad9361_client_t() {}
@@ -60,7 +54,7 @@ public:
         }
     }
     clocking_mode_t get_clocking_mode() {
-        return AD9361_XTAL_N_CLK_PATH;
+        return clocking_mode_t::AD9361_XTAL_N_CLK_PATH;
     }
     digital_interface_mode_t get_digital_interface_mode() {
         return AD9361_DDR_FDD_LVCMOS;
@@ -68,7 +62,7 @@ public:
     digital_interface_delays_t get_digital_interface_timing() {
         digital_interface_delays_t delays;
         delays.rx_clk_delay = 0;
-        delays.rx_data_delay = 0x8;
+        delays.rx_data_delay = 0xF;
         delays.tx_clk_delay = 0;
         delays.tx_data_delay = 0xF;
         return delays;

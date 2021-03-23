@@ -1,25 +1,15 @@
 //
 // Copyright 2016 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #ifndef INCLUDED_DBOARD_TWINRX_GAIN_TABLES_HPP
 #define INCLUDED_DBOARD_TWINRX_GAIN_TABLES_HPP
 
 #include <uhd/config.hpp>
-#include <boost/cstdint.hpp>
+#include <stdint.h>
 #include <uhd/types/ranges.hpp>
 #include "twinrx_ctrl.hpp"
 
@@ -29,7 +19,7 @@ class twinrx_gain_config_t {
 public:
     twinrx_gain_config_t(
         size_t index_, double sys_gain_,
-        boost::uint8_t atten1_, boost::uint8_t atten2_,
+        uint8_t atten1_, uint8_t atten2_,
         bool amp1_, bool amp2_
     ): index(index_), sys_gain(sys_gain_), atten1(atten1_), atten2(atten2_),
        amp1(amp1_), amp2(amp2_)
@@ -49,8 +39,8 @@ public:
 
     size_t         index;
     double         sys_gain;
-    boost::uint8_t atten1;
-    boost::uint8_t atten2;
+    uint8_t atten1;
+    uint8_t atten2;
     bool           amp1;
     bool           amp2;
 };

@@ -1,28 +1,18 @@
 //
 // Copyright 2016 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-#include "dsp_core_utils.hpp"
 #include <uhd/utils/math.hpp>
 #include <uhd/exception.hpp>
+#include <uhdlib/usrp/cores/dsp_core_utils.hpp>
 #include <boost/math/special_functions/round.hpp>
 #include <boost/math/special_functions/sign.hpp>
 
-static const int32_t MAX_FREQ_WORD = boost::numeric::bounds<boost::int32_t>::highest();
-static const int32_t MIN_FREQ_WORD = boost::numeric::bounds<boost::int32_t>::lowest();
+static const int32_t MAX_FREQ_WORD = boost::numeric::bounds<int32_t>::highest();
+static const int32_t MIN_FREQ_WORD = boost::numeric::bounds<int32_t>::lowest();
 
 void get_freq_and_freq_word(
         const double requested_freq,

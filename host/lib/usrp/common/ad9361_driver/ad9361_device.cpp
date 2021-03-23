@@ -1,18 +1,8 @@
 //
 // Copyright 2014 Ettus Research
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include "ad9361_filter_taps.h"
@@ -21,16 +11,16 @@
 #include "ad9361_client.h"
 #include "ad9361_device.h"
 #define _USE_MATH_DEFINES
-#include <cmath>
 #include <uhd/exception.hpp>
 #include <uhd/utils/log.hpp>
-#include <uhd/utils/msg.hpp>
-#include <boost/cstdint.hpp>
-#include <boost/date_time/posix_time/posix_time.hpp>
-#include <boost/thread/thread.hpp>
+
 #include <boost/scoped_array.hpp>
 #include <boost/format.hpp>
 #include <boost/math/special_functions.hpp>
+#include <chrono>
+#include <thread>
+#include <cmath>
+#include <stdint.h>
 
 ////////////////////////////////////////////////////////////
 // the following macros evaluate to a compile time constant
@@ -95,7 +85,8 @@ const double ad9361_device_t::AD9361_MIN_CLOCK_RATE  = 220e3;
 const double ad9361_device_t::AD9361_MAX_CLOCK_RATE  = 61.44e6;
 const double ad9361_device_t::AD9361_CAL_VALID_WINDOW = 100e6;
 // Max bandwdith is due to filter rolloff in analog filter stage
-const double ad9361_device_t::AD9361_RECOMMENDED_MAX_BANDWIDTH = 56e6;
+const double ad9361_device_t::AD9361_MIN_BW = 200e3;
+const double ad9361_device_t::AD9361_MAX_BW = 56e6;
 
 /* Startup RF frequencies */
 const double ad9361_device_t::DEFAULT_RX_FREQ = 800e6;
@@ -107,9 +98,9 @@ const double ad9361_device_t::DEFAULT_TX_FREQ = 850e6;
  * how many taps are in the filter, and given a vector of the taps
  * themselves.  */
 
-void ad9361_device_t::_program_fir_filter(direction_t direction, chain_t chain, int num_taps, boost::uint16_t *coeffs)
+void ad9361_device_t::_program_fir_filter(direction_t direction, chain_t chain, int num_taps, uint16_t *coeffs)
 {
-    boost::uint16_t base;
+    uint16_t base;
 
     /* RX and TX filters use largely identical sets of programming registers.
      Select the appropriate bank of registers here. */
@@ -120,9 +111,9 @@ void ad9361_device_t::_program_fir_filter(direction_t direction, chain_t chain, 
     }
 
     /* Encode number of filter taps for programming register */
-    boost::uint8_t reg_numtaps = (((num_taps / 16) - 1) & 0x07) << 5;
+    uint8_t reg_numtaps = (((num_taps / 16) - 1) & 0x07) << 5;
 
-    boost::uint8_t reg_chain = 0;
+    uint8_t reg_chain = 0;
     switch (chain) {
     case CHAIN_1:
         reg_chain = 0x01 << 3;
@@ -136,7 +127,7 @@ void ad9361_device_t::_program_fir_filter(direction_t direction, chain_t chain, 
 
     /* Turn on the filter clock. */
     _io_iface->poke8(base + 5, reg_numtaps | reg_chain | 0x02);
-    boost::this_thread::sleep(boost::posix_time::milliseconds(1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
     /* Zero the unused taps just in case they have stale data */
     int addr;
@@ -182,25 +173,25 @@ void ad9361_device_t::_program_fir_filter(direction_t direction, chain_t chain, 
 
 
 /* Program the RX FIR Filter. */
-void ad9361_device_t::_setup_rx_fir(size_t num_taps, boost::int32_t decimation)
+void ad9361_device_t::_setup_rx_fir(size_t num_taps, int32_t decimation)
 {
     if (not (decimation == 1 or decimation == 2 or decimation == 4)) {
         throw uhd::runtime_error("[ad9361_device_t] Invalid Rx FIR decimation.");
     }
-    boost::scoped_array<boost::uint16_t> coeffs(new boost::uint16_t[num_taps]);
+    boost::scoped_array<uint16_t> coeffs(new uint16_t[num_taps]);
     for (size_t i = 0; i < num_taps; i++) {
         switch (num_taps) {
         case 128:
-            coeffs[i] = boost::uint16_t((decimation==4) ? fir_128_x4_coeffs[i] : hb127_coeffs[i]);
+            coeffs[i] = uint16_t((decimation==4) ? fir_128_x4_coeffs[i] : hb127_coeffs[i]);
             break;
         case 96:
-            coeffs[i] = boost::uint16_t((decimation==4) ? fir_96_x4_coeffs[i] : hb95_coeffs[i]);
+            coeffs[i] = uint16_t((decimation==4) ? fir_96_x4_coeffs[i] : hb95_coeffs[i]);
             break;
         case 64:
-            coeffs[i] = boost::uint16_t((decimation==4) ? fir_64_x4_coeffs[i] : hb63_coeffs[i]);
+            coeffs[i] = uint16_t((decimation==4) ? fir_64_x4_coeffs[i] : hb63_coeffs[i]);
             break;
         case 48:
-            coeffs[i] = boost::uint16_t((decimation==4) ? fir_48_x4_coeffs[i] : hb47_coeffs[i]);
+            coeffs[i] = uint16_t((decimation==4) ? fir_48_x4_coeffs[i] : hb47_coeffs[i]);
             break;
         default:
             throw uhd::runtime_error("[ad9361_device_t] Unsupported number of Rx FIR taps.");
@@ -211,7 +202,7 @@ void ad9361_device_t::_setup_rx_fir(size_t num_taps, boost::int32_t decimation)
 }
 
 /* Program the TX FIR Filter. */
-void ad9361_device_t::_setup_tx_fir(size_t num_taps, boost::int32_t interpolation)
+void ad9361_device_t::_setup_tx_fir(size_t num_taps, int32_t interpolation)
 {
     if (not (interpolation == 1 or interpolation == 2 or interpolation == 4)) {
         throw uhd::runtime_error("[ad9361_device_t] Invalid Tx FIR interpolation.");
@@ -219,20 +210,20 @@ void ad9361_device_t::_setup_tx_fir(size_t num_taps, boost::int32_t interpolatio
     if (interpolation == 1 and num_taps > 64) {
         throw uhd::runtime_error("[ad9361_device_t] Too many Tx FIR taps for interpolation value.");
     }
-    boost::scoped_array<boost::uint16_t> coeffs(new boost::uint16_t[num_taps]);
+    boost::scoped_array<uint16_t> coeffs(new uint16_t[num_taps]);
     for (size_t i = 0; i < num_taps; i++) {
         switch (num_taps) {
         case 128:
-            coeffs[i] = boost::uint16_t((interpolation==4) ? fir_128_x4_coeffs[i] : hb127_coeffs[i]);
+            coeffs[i] = uint16_t((interpolation==4) ? fir_128_x4_coeffs[i] : hb127_coeffs[i]);
             break;
         case 96:
-            coeffs[i] = boost::uint16_t((interpolation==4) ? fir_96_x4_coeffs[i] : hb95_coeffs[i]);
+            coeffs[i] = uint16_t((interpolation==4) ? fir_96_x4_coeffs[i] : hb95_coeffs[i]);
             break;
         case 64:
-            coeffs[i] = boost::uint16_t((interpolation==4) ? fir_64_x4_coeffs[i] : hb63_coeffs[i]);
+            coeffs[i] = uint16_t((interpolation==4) ? fir_64_x4_coeffs[i] : hb63_coeffs[i]);
             break;
         case 48:
-            coeffs[i] = boost::uint16_t((interpolation==4) ? fir_48_x4_coeffs[i] : hb47_coeffs[i]);
+            coeffs[i] = uint16_t((interpolation==4) ? fir_48_x4_coeffs[i] : hb47_coeffs[i]);
             break;
         default:
             throw uhd::runtime_error("[ad9361_device_t] Unsupported number of Tx FIR taps.");
@@ -267,7 +258,7 @@ void ad9361_device_t::_calibrate_lock_bbpll()
             break;
         }
         count++;
-        boost::this_thread::sleep(boost::posix_time::milliseconds(2));
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
 }
 
@@ -292,7 +283,7 @@ void ad9361_device_t::_calibrate_synth_charge_pumps()
             break;
         }
         count++;
-        boost::this_thread::sleep(boost::posix_time::milliseconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     _io_iface->poke8(0x23d, 0x00);
 
@@ -305,7 +296,7 @@ void ad9361_device_t::_calibrate_synth_charge_pumps()
             break;
         }
         count++;
-        boost::this_thread::sleep(boost::posix_time::milliseconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     _io_iface->poke8(0x27d, 0x00);
 }
@@ -321,7 +312,7 @@ double ad9361_device_t::_calibrate_baseband_rx_analog_filter(double req_rfbw)
     double bbbw = req_rfbw / 2.0;
     if(bbbw > _baseband_bw / 2.0)
     {
-        UHD_LOG << "baseband bandwidth too large for current sample rate. Setting bandwidth to: "<<_baseband_bw;
+        UHD_LOGGER_DEBUG("AD936X")<< "baseband bandwidth too large for current sample rate. Setting bandwidth to: "<<_baseband_bw;
         bbbw = _baseband_bw / 2.0;
     }
 
@@ -335,16 +326,16 @@ double ad9361_device_t::_calibrate_baseband_rx_analog_filter(double req_rfbw)
     }
 
     double rxtune_clk = ((1.4 * bbbw * 2 * M_PI) / M_LN2);
-    _rx_bbf_tunediv = std::min<boost::uint16_t>(511, boost::uint16_t(std::ceil(_bbpll_freq / rxtune_clk)));
+    _rx_bbf_tunediv = std::min<uint16_t>(511, uint16_t(std::ceil(_bbpll_freq / rxtune_clk)));
     _regs.bbftune_config = (_regs.bbftune_config & 0xFE)
             | ((_rx_bbf_tunediv >> 8) & 0x0001);
 
     double bbbw_mhz = bbbw / 1e6;
     double temp = ((bbbw_mhz - std::floor(bbbw_mhz)) * 1000) / 7.8125;
-    boost::uint8_t bbbw_khz = std::min<boost::uint8_t>(127, boost::uint8_t(std::floor(temp + 0.5)));
+    uint8_t bbbw_khz = std::min<uint8_t>(127, uint8_t(std::floor(temp + 0.5)));
 
     /* Set corner frequencies and dividers. */
-    _io_iface->poke8(0x1fb, (boost::uint8_t) (bbbw_mhz));
+    _io_iface->poke8(0x1fb, (uint8_t) (bbbw_mhz));
     _io_iface->poke8(0x1fc, bbbw_khz);
     _io_iface->poke8(0x1f8, (_rx_bbf_tunediv & 0x00FF));
     _io_iface->poke8(0x1f9, _regs.bbftune_config);
@@ -366,7 +357,7 @@ double ad9361_device_t::_calibrate_baseband_rx_analog_filter(double req_rfbw)
             break;
         }
         count++;
-        boost::this_thread::sleep(boost::posix_time::milliseconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     /* Disable RX1 & RX2 filter tuners. */
@@ -388,7 +379,7 @@ double ad9361_device_t::_calibrate_baseband_tx_analog_filter(double req_rfbw)
 
     if(bbbw > _baseband_bw / 2.0)
     {
-        UHD_LOG << "baseband bandwidth too large for current sample rate. Setting bandwidth to: "<<_baseband_bw;
+        UHD_LOGGER_DEBUG("AD936X")<< "baseband bandwidth too large for current sample rate. Setting bandwidth to: "<<_baseband_bw;
         bbbw = _baseband_bw / 2.0;
     }
 
@@ -402,7 +393,7 @@ double ad9361_device_t::_calibrate_baseband_tx_analog_filter(double req_rfbw)
     }
 
     double txtune_clk = ((1.6 * bbbw * 2 * M_PI) / M_LN2);
-    boost::uint16_t txbbfdiv = std::min<boost::uint16_t>(511, boost::uint16_t(std::ceil(_bbpll_freq / txtune_clk)));
+    uint16_t txbbfdiv = std::min<uint16_t>(511, uint16_t(std::ceil(_bbpll_freq / txtune_clk)));
     _regs.bbftune_mode = (_regs.bbftune_mode & 0xFE)
             | ((txbbfdiv >> 8) & 0x0001);
 
@@ -423,7 +414,7 @@ double ad9361_device_t::_calibrate_baseband_tx_analog_filter(double req_rfbw)
         }
 
         count++;
-        boost::this_thread::sleep(boost::posix_time::milliseconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     /* Disable the filter tuner. */
@@ -443,7 +434,7 @@ double ad9361_device_t::_calibrate_secondary_tx_filter(double req_rfbw)
 
     if(bbbw > _baseband_bw / 2.0)
     {
-        UHD_LOG << "baseband bandwidth too large for current sample rate. Setting bandwidth to: "<<_baseband_bw;
+        UHD_LOGGER_DEBUG("AD936X")<< "baseband bandwidth too large for current sample rate. Setting bandwidth to: "<<_baseband_bw;
         bbbw = _baseband_bw / 2.0;
     }
 
@@ -481,7 +472,7 @@ double ad9361_device_t::_calibrate_secondary_tx_filter(double req_rfbw)
         cap = 63;
     }
 
-    boost::uint8_t reg0d0, reg0d1, reg0d2;
+    uint8_t reg0d0, reg0d1, reg0d2;
 
     /* Translate baseband bandwidths to register settings. */
     if ((bbbw_mhz * 2) <= 9) {
@@ -491,8 +482,8 @@ double ad9361_device_t::_calibrate_secondary_tx_filter(double req_rfbw)
     } else if ((bbbw_mhz * 2) > 24) {
         reg0d0 = 0x57;
     } else {
-        throw uhd::runtime_error("[ad9361_device_t] Cal2ndTxFil: INVALID_CODE_PATH bad bbbw_mhz");
         reg0d0 = 0x00;
+        throw uhd::runtime_error("[ad9361_device_t] Cal2ndTxFil: INVALID_CODE_PATH bad bbbw_mhz");
     }
 
     /* Translate resistor values to register settings. */
@@ -526,20 +517,20 @@ double ad9361_device_t::_calibrate_secondary_tx_filter(double req_rfbw)
  * UG570 page 33 states that this filter should be calibrated to 2.5 * bbbw */
 double ad9361_device_t::_calibrate_rx_TIAs(double req_rfbw)
 {
-    boost::uint8_t reg1eb = _io_iface->peek8(0x1eb) & 0x3F;
-    boost::uint8_t reg1ec = _io_iface->peek8(0x1ec) & 0x7F;
-    boost::uint8_t reg1e6 = _io_iface->peek8(0x1e6) & 0x07;
-    boost::uint8_t reg1db = 0x00;
-    boost::uint8_t reg1dc = 0x00;
-    boost::uint8_t reg1dd = 0x00;
-    boost::uint8_t reg1de = 0x00;
-    boost::uint8_t reg1df = 0x00;
+    uint8_t reg1eb = _io_iface->peek8(0x1eb) & 0x3F;
+    uint8_t reg1ec = _io_iface->peek8(0x1ec) & 0x7F;
+    uint8_t reg1e6 = _io_iface->peek8(0x1e6) & 0x07;
+    uint8_t reg1db = 0x00;
+    uint8_t reg1dc = 0x00;
+    uint8_t reg1dd = 0x00;
+    uint8_t reg1de = 0x00;
+    uint8_t reg1df = 0x00;
 
     double bbbw = req_rfbw / 2.0;
 
     if(bbbw > _baseband_bw / 2.0)
     {
-        UHD_LOG << "baseband bandwidth too large for current sample rate. Setting bandwidth to: "<<_baseband_bw;
+        UHD_LOGGER_DEBUG("AD936X")<< "baseband bandwidth too large for current sample rate. Setting bandwidth to: "<<_baseband_bw;
         bbbw = _baseband_bw / 2.0;
     }
 
@@ -572,12 +563,12 @@ double ad9361_device_t::_calibrate_rx_TIAs(double req_rfbw)
     if (CTIA_fF > 2920) {
         reg1dc = 0x40;
         reg1de = 0x40;
-        boost::uint8_t temp = (boost::uint8_t) std::min<boost::uint8_t>(127,
-                boost::uint8_t(std::floor(0.5 + ((CTIA_fF - 400.0) / 320.0))));
+        uint8_t temp = (uint8_t) std::min<uint8_t>(127,
+                uint8_t(std::floor(0.5 + ((CTIA_fF - 400.0) / 320.0))));
         reg1dd = temp;
         reg1df = temp;
     } else {
-        boost::uint8_t temp = boost::uint8_t(std::floor(0.5 + ((CTIA_fF - 400.0) / 40.0)) + 0x40);
+        uint8_t temp = uint8_t(std::floor(0.5 + ((CTIA_fF - 400.0) / 40.0)) + 0x40);
         reg1dc = temp;
         reg1de = temp;
         reg1dd = 0;
@@ -613,9 +604,9 @@ void ad9361_device_t::_setup_adc()
         bbbw_mhz = 0.20;
     }
 
-    boost::uint8_t rxbbf_c3_msb = _io_iface->peek8(0x1eb) & 0x3F;
-    boost::uint8_t rxbbf_c3_lsb = _io_iface->peek8(0x1ec) & 0x7F;
-    boost::uint8_t rxbbf_r2346 = _io_iface->peek8(0x1e6) & 0x07;
+    uint8_t rxbbf_c3_msb = _io_iface->peek8(0x1eb) & 0x3F;
+    uint8_t rxbbf_c3_lsb = _io_iface->peek8(0x1ec) & 0x7F;
+    uint8_t rxbbf_r2346 = _io_iface->peek8(0x1e6) & 0x07;
 
     double fsadc = _adcclock_freq / 1e6;
 
@@ -644,71 +635,71 @@ void ad9361_device_t::_setup_adc()
     /* Calculate the values for all 40 settings registers.
      *
      * DO NOT TOUCH THIS UNLESS YOU KNOW EXACTLY WHAT YOU ARE DOING. kthx.*/
-    boost::uint8_t data[40];
+    uint8_t data[40];
     data[0] = 0;    data[1] = 0; data[2] = 0; data[3] = 0x24;
     data[4] = 0x24; data[5] = 0; data[6] = 0;
-    data[7] = std::min<boost::uint8_t>(124, boost::uint8_t(std::floor(-0.5
+    data[7] = std::min<uint8_t>(124, uint8_t(std::floor(-0.5
                     + (80.0 * scale_snr * scale_res
                     * std::min<double>(1.0, sqrt(maxsnr * fsadc / 640.0))))));
     double data007 = data[7];
-    data[8] = std::min<boost::uint8_t>(255, boost::uint8_t(std::floor(0.5
+    data[8] = std::min<uint8_t>(255, uint8_t(std::floor(0.5
                     + ((20.0 * (640.0 / fsadc) * ((data007 / 80.0))
                     / (scale_res * scale_cap))))));
-    data[10] = std::min<boost::uint8_t>(127, boost::uint8_t(std::floor(-0.5 + (77.0 * scale_res
+    data[10] = std::min<uint8_t>(127, uint8_t(std::floor(-0.5 + (77.0 * scale_res
                     * std::min<double>(1.0, sqrt(maxsnr * fsadc / 640.0))))));
     double data010 = data[10];
-    data[9] = std::min<boost::uint8_t>(127, boost::uint8_t(std::floor(0.8 * data010)));
-    data[11] = std::min<boost::uint8_t>(255, boost::uint8_t(std::floor(0.5
+    data[9] = std::min<uint8_t>(127, uint8_t(std::floor(0.8 * data010)));
+    data[11] = std::min<uint8_t>(255, uint8_t(std::floor(0.5
                     + (20.0 * (640.0 / fsadc) * ((data010 / 77.0)
                     / (scale_res * scale_cap))))));
-    data[12] = std::min<boost::uint8_t>(127, boost::uint8_t(std::floor(-0.5
+    data[12] = std::min<uint8_t>(127, uint8_t(std::floor(-0.5
                     + (80.0 * scale_res * std::min<double>(1.0,
                     sqrt(maxsnr * fsadc / 640.0))))));
     double data012 = data[12];
-    data[13] = std::min<boost::uint8_t>(255, boost::uint8_t(std::floor(-1.5
+    data[13] = std::min<uint8_t>(255, uint8_t(std::floor(-1.5
                     + (20.0 * (640.0 / fsadc) * ((data012 / 80.0)
                     / (scale_res * scale_cap))))));
-    data[14] = 21 * boost::uint8_t(std::floor(0.1 * 640.0 / fsadc));
-    data[15] = std::min<boost::uint8_t>(127, boost::uint8_t(1.025 * data007));
+    data[14] = 21 * uint8_t(std::floor(0.1 * 640.0 / fsadc));
+    data[15] = std::min<uint8_t>(127, uint8_t(1.025 * data007));
     double data015 = data[15];
-    data[16] = std::min<boost::uint8_t>(127, boost::uint8_t(std::floor((data015
+    data[16] = std::min<uint8_t>(127, uint8_t(std::floor((data015
                     * (0.98 + (0.02 * std::max<double>(1.0,
                     (640.0 / fsadc) / maxsnr)))))));
     data[17] = data[15];
-    data[18] = std::min<boost::uint8_t>(127, boost::uint8_t(0.975 * (data010)));
+    data[18] = std::min<uint8_t>(127, uint8_t(0.975 * (data010)));
     double data018 = data[18];
-    data[19] = std::min<boost::uint8_t>(127, boost::uint8_t(std::floor((data018
+    data[19] = std::min<uint8_t>(127, uint8_t(std::floor((data018
                     * (0.98 + (0.02 * std::max<double>(1.0,
                     (640.0 / fsadc) / maxsnr)))))));
     data[20] = data[18];
-    data[21] = std::min<boost::uint8_t>(127, boost::uint8_t(0.975 * data012));
+    data[21] = std::min<uint8_t>(127, uint8_t(0.975 * data012));
     double data021 = data[21];
-    data[22] = std::min<boost::uint8_t>(127, boost::uint8_t(std::floor((data021
+    data[22] = std::min<uint8_t>(127, uint8_t(std::floor((data021
                     * (0.98 + (0.02 * std::max<double>(1.0,
                     (640.0 / fsadc) / maxsnr)))))));
     data[23] = data[21];
     data[24] = 0x2e;
-    data[25] = boost::uint8_t(std::floor(128.0 + std::min<double>(63.0,
+    data[25] = uint8_t(std::floor(128.0 + std::min<double>(63.0,
                     63.0 * (fsadc / 640.0))));
-    data[26] = boost::uint8_t(std::floor(std::min<double>(63.0, 63.0 * (fsadc / 640.0)
+    data[26] = uint8_t(std::floor(std::min<double>(63.0, 63.0 * (fsadc / 640.0)
                     * (0.92 + (0.08 * (640.0 / fsadc))))));
-    data[27] = boost::uint8_t(std::floor(std::min<double>(63.0,
+    data[27] = uint8_t(std::floor(std::min<double>(63.0,
                     32.0 * sqrt(fsadc / 640.0))));
-    data[28] = boost::uint8_t(std::floor(128.0 + std::min<double>(63.0,
+    data[28] = uint8_t(std::floor(128.0 + std::min<double>(63.0,
                     63.0 * (fsadc / 640.0))));
-    data[29] = boost::uint8_t(std::floor(std::min<double>(63.0,
+    data[29] = uint8_t(std::floor(std::min<double>(63.0,
                     63.0 * (fsadc / 640.0)
                     * (0.92 + (0.08 * (640.0 / fsadc))))));
-    data[30] = boost::uint8_t(std::floor(std::min<double>(63.0,
+    data[30] = uint8_t(std::floor(std::min<double>(63.0,
                     32.0 * sqrt(fsadc / 640.0))));
-    data[31] = boost::uint8_t(std::floor(128.0 + std::min<double>(63.0,
+    data[31] = uint8_t(std::floor(128.0 + std::min<double>(63.0,
                     63.0 * (fsadc / 640.0))));
-    data[32] = boost::uint8_t(std::floor(std::min<double>(63.0,
+    data[32] = uint8_t(std::floor(std::min<double>(63.0,
                     63.0 * (fsadc / 640.0) * (0.92
                     + (0.08 * (640.0 / fsadc))))));
-    data[33] = boost::uint8_t(std::floor(std::min<double>(63.0,
+    data[33] = uint8_t(std::floor(std::min<double>(63.0,
                     63.0 * sqrt(fsadc / 640.0))));
-    data[34] = std::min<boost::uint8_t>(127, boost::uint8_t(std::floor(64.0
+    data[34] = std::min<uint8_t>(127, uint8_t(std::floor(64.0
                     * sqrt(fsadc / 640.0))));
     data[35] = 0x40;
     data[36] = 0x40;
@@ -743,7 +734,7 @@ void ad9361_device_t::_calibrate_baseband_dc_offset()
             break;
         }
         count++;
-        boost::this_thread::sleep(boost::posix_time::milliseconds(5));
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 }
 
@@ -776,7 +767,7 @@ void ad9361_device_t::_calibrate_rf_dc_offset()
             break;
         }
         count++;
-        boost::this_thread::sleep(boost::posix_time::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
     _io_iface->poke8(0x18b, 0x8d); // Enable RF DC tracking
@@ -827,7 +818,7 @@ void ad9361_device_t::_calibrate_rx_quadrature()
             break;
         }
         count++;
-        boost::this_thread::sleep(boost::posix_time::milliseconds(5));
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 
     _io_iface->poke8(0x057, 0x30); // Re-enable Tx mixers
@@ -848,8 +839,8 @@ void ad9361_device_t::_tx_quadrature_cal_routine() {
      * 3) Re-read 0A3 to get bits [5:0] because maybe they changed?
      * 4) Update only the TX NCO freq bits in 0A3.
      * 5) Profit (I hope). */
-    boost::uint8_t reg0a3 = _io_iface->peek8(0x0a3);
-    boost::uint8_t nco_freq = (reg0a3 & 0xC0);
+    uint8_t reg0a3 = _io_iface->peek8(0x0a3);
+    uint8_t nco_freq = (reg0a3 & 0xC0);
     _io_iface->poke8(0x0a0, 0x15 | (nco_freq >> 1));
     reg0a3 = _io_iface->peek8(0x0a3);
     _io_iface->poke8(0x0a3, (reg0a3 & 0x3F) | nco_freq);
@@ -895,7 +886,7 @@ void ad9361_device_t::_tx_quadrature_cal_routine() {
             break;
         }
         count++;
-        boost::this_thread::sleep(boost::posix_time::milliseconds(10));
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 }
 
@@ -916,7 +907,7 @@ void ad9361_device_t::_calibrate_tx_quadrature()
     /* This calibration must be done in a certain order, and for both TX_A
      * and TX_B, separately. Store the original setting so that we can
      * restore it later. */
-    boost::uint8_t orig_reg_inputsel = _regs.inputsel;
+    uint8_t orig_reg_inputsel = _regs.inputsel;
 
     /***********************************************************************
      * TX1/2-A Calibration
@@ -951,10 +942,12 @@ void ad9361_device_t::_calibrate_tx_quadrature()
  * Note that this table is fixed for all frequency settings. */
 void ad9361_device_t::_program_mixer_gm_subtable()
 {
-    boost::uint8_t gain[] = { 0x78, 0x74, 0x70, 0x6C, 0x68, 0x64, 0x60, 0x5C, 0x58,
+    // clang-format off
+    uint8_t gain[] = { 0x78, 0x74, 0x70, 0x6C, 0x68, 0x64, 0x60, 0x5C, 0x58,
             0x54, 0x50, 0x4C, 0x48, 0x30, 0x18, 0x00 };
-    boost::uint8_t gm[] = { 0x00, 0x0D, 0x15, 0x1B, 0x21, 0x25, 0x29, 0x2C, 0x2F, 0x31,
+    uint8_t gm[] = { 0x00, 0x0D, 0x15, 0x1B, 0x21, 0x25, 0x29, 0x2C, 0x2F, 0x31,
             0x33, 0x34, 0x35, 0x3A, 0x3D, 0x3E };
+    // clang-format on
 
     /* Start the clock. */
     _io_iface->poke8(0x13f, 0x02);
@@ -984,8 +977,8 @@ void ad9361_device_t::_program_mixer_gm_subtable()
 void ad9361_device_t::_program_gain_table() {
     /* Figure out which gain table we should be using for our current
      * frequency band. */
-    boost::uint8_t (*gain_table)[3] = NULL;
-    boost::uint8_t new_gain_table;
+    uint8_t (*gain_table)[3] = NULL;
+    uint8_t new_gain_table;
     if (_rx_freq < 1300e6) {
         gain_table = gain_table_sub_1300mhz;
         new_gain_table = 1;
@@ -996,8 +989,8 @@ void ad9361_device_t::_program_gain_table() {
         gain_table = gain_table_4000mhz_to_6000mhz;
         new_gain_table = 3;
     } else {
-        throw uhd::runtime_error("[ad9361_device_t] Wrong _rx_freq value");
         new_gain_table = 1;
+        throw uhd::runtime_error("[ad9361_device_t] Wrong _rx_freq value");
     }
 
     /* Only re-program the gain table if there has been a band change. */
@@ -1012,7 +1005,7 @@ void ad9361_device_t::_program_gain_table() {
     _io_iface->poke8(0x137, 0x1A);
 
     /* IT'S PROGRAMMING TIME. */
-    boost::uint8_t index = 0;
+    uint8_t index = 0;
     for (; index < 77; index++) {
         _io_iface->poke8(0x130, index);
         _io_iface->poke8(0x131, gain_table[index][0]);
@@ -1118,18 +1111,18 @@ void ad9361_device_t::_setup_synth(direction_t direction, double vcorate)
         throw uhd::runtime_error("[ad9361_device_t] vcoindex > 53");
 
     /* Parse the values out of the LUT based on our calculated index... */
-    boost::uint8_t vco_output_level = synth_cal_lut[vcoindex][0];
-    boost::uint8_t vco_varactor = synth_cal_lut[vcoindex][1];
-    boost::uint8_t vco_bias_ref = synth_cal_lut[vcoindex][2];
-    boost::uint8_t vco_bias_tcf = synth_cal_lut[vcoindex][3];
-    boost::uint8_t vco_cal_offset = synth_cal_lut[vcoindex][4];
-    boost::uint8_t vco_varactor_ref = synth_cal_lut[vcoindex][5];
-    boost::uint8_t charge_pump_curr = synth_cal_lut[vcoindex][6];
-    boost::uint8_t loop_filter_c2 = synth_cal_lut[vcoindex][7];
-    boost::uint8_t loop_filter_c1 = synth_cal_lut[vcoindex][8];
-    boost::uint8_t loop_filter_r1 = synth_cal_lut[vcoindex][9];
-    boost::uint8_t loop_filter_c3 = synth_cal_lut[vcoindex][10];
-    boost::uint8_t loop_filter_r3 = synth_cal_lut[vcoindex][11];
+    uint8_t vco_output_level = synth_cal_lut[vcoindex][0];
+    uint8_t vco_varactor = synth_cal_lut[vcoindex][1];
+    uint8_t vco_bias_ref = synth_cal_lut[vcoindex][2];
+    uint8_t vco_bias_tcf = synth_cal_lut[vcoindex][3];
+    uint8_t vco_cal_offset = synth_cal_lut[vcoindex][4];
+    uint8_t vco_varactor_ref = synth_cal_lut[vcoindex][5];
+    uint8_t charge_pump_curr = synth_cal_lut[vcoindex][6];
+    uint8_t loop_filter_c2 = synth_cal_lut[vcoindex][7];
+    uint8_t loop_filter_c1 = synth_cal_lut[vcoindex][8];
+    uint8_t loop_filter_r1 = synth_cal_lut[vcoindex][9];
+    uint8_t loop_filter_c3 = synth_cal_lut[vcoindex][10];
+    uint8_t loop_filter_r3 = synth_cal_lut[vcoindex][11];
 
     /* ... annnd program! */
     if (direction == RX) {
@@ -1169,7 +1162,7 @@ void ad9361_device_t::_setup_synth(direction_t direction, double vcorate)
  * fed to the public set_clock_rate function. */
 double ad9361_device_t::_tune_bbvco(const double rate)
 {
-    UHD_LOG << boost::format("[ad9361_device_t::_tune_bbvco] rate=%.10f\n") % rate;
+    UHD_LOGGER_TRACE("AD936X")<< boost::format("[ad9361_device_t::_tune_bbvco] rate=%.10f\n") % rate;
 
     /* Let's not re-tune to the same frequency over and over... */
     if (freq_is_nearly_equal(rate, _req_coreclk)) {
@@ -1197,13 +1190,13 @@ double ad9361_device_t::_tune_bbvco(const double rate)
     if (i == 7)
         throw uhd::runtime_error("[ad9361_device_t] _tune_bbvco: wrong vcorate");
 
-    UHD_LOG << boost::format("[ad9361_device_t::_tune_bbvco] vcodiv=%d vcorate=%.10f\n") % vcodiv % vcorate;
+    UHD_LOGGER_TRACE("AD936X")<< boost::format("[ad9361_device_t::_tune_bbvco] vcodiv=%d vcorate=%.10f\n") % vcodiv % vcorate;
     /* Fo = Fref * (Nint + Nfrac / mod) */
     int nint = static_cast<int>(vcorate / fref);
-    UHD_LOG << boost::format("[ad9361_device_t::_tune_bbvco] (nint)=%.10f\n") % (vcorate / fref);
+    UHD_LOGGER_TRACE("AD936X")<< boost::format("[ad9361_device_t::_tune_bbvco] (nint)=%.10f\n") % (vcorate / fref);
     int nfrac = static_cast<int>(boost::math::round(((vcorate / fref) - (double) nint) * (double) modulus));
-    UHD_LOG << boost::format("[ad9361_device_t::_tune_bbvco] (nfrac)=%.10f\n") % (((vcorate / fref) - (double) nint) * (double) modulus);
-    UHD_LOG << boost::format("[ad9361_device_t::_tune_bbvco] nint=%d nfrac=%d\n") % nint % nfrac;
+    UHD_LOGGER_TRACE("AD936X")<< boost::format("[ad9361_device_t::_tune_bbvco] (nfrac)=%.10f\n") % (((vcorate / fref) - (double) nint) * (double) modulus);
+    UHD_LOGGER_TRACE("AD936X")<< boost::format("[ad9361_device_t::_tune_bbvco] nint=%d nfrac=%d\n") % nint % nfrac;
     double actual_vcorate = fref
             * ((double) nint + ((double) nfrac / (double) modulus));
 
@@ -1318,7 +1311,7 @@ double ad9361_device_t::_tune_helper(direction_t direction, const double value)
         _io_iface->poke8(0x005, _regs.vcodivs);
 
         /* Lock the PLL! */
-        boost::this_thread::sleep(boost::posix_time::milliseconds(2));
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
         if ((_io_iface->peek8(0x247) & 0x02) == 0) {
             throw uhd::runtime_error("[ad9361_device_t] RX PLL NOT LOCKED");
         }
@@ -1359,7 +1352,7 @@ double ad9361_device_t::_tune_helper(direction_t direction, const double value)
         _io_iface->poke8(0x005, _regs.vcodivs);
 
         /* Lock the PLL! */
-        boost::this_thread::sleep(boost::posix_time::milliseconds(2));
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
         if ((_io_iface->peek8(0x287) & 0x02) == 0) {
             throw uhd::runtime_error("[ad9361_device_t] TX PLL NOT LOCKED");
         }
@@ -1381,7 +1374,7 @@ double ad9361_device_t::_setup_rates(const double rate)
     /* If we make it into this function, then we are tuning to a new rate.
      * Store the new rate. */
     _req_clock_rate = rate;
-    UHD_LOG << boost::format("[ad9361_device_t::_setup_rates] rate=%.6d\n") % rate;
+    UHD_LOGGER_TRACE("AD936X")<< boost::format("[ad9361_device_t::_setup_rates] rate=%.6d\n") % rate;
 
     /* Set the decimation and interpolation values in the RX and TX chains.
      * This also switches filters in / out. Note that all transmitters and
@@ -1454,7 +1447,8 @@ double ad9361_device_t::_setup_rates(const double rate)
         _rfir_factor = 2;
     } else if ((rate > 58e6) && (rate <= 61.44e6)) {
         // RX1 + RX2 enabled, 2, 1, 2, 2
-        _regs.rxfilt = B8(11010110);
+        _regs.rxfilt = B8(11001110);
+
 
         // TX1 + TX2 enabled, 2, 1, 1, 2
         _regs.txfilt = B8(11010010);
@@ -1467,7 +1461,7 @@ double ad9361_device_t::_setup_rates(const double rate)
         throw uhd::runtime_error("[ad9361_device_t] [_setup_rates] INVALID_CODE_PATH");
     }
 
-    UHD_LOG << boost::format("[ad9361_device_t::_setup_rates] divfactor=%d\n") % divfactor;
+    UHD_LOGGER_TRACE("AD936X")<< boost::format("[ad9361_device_t::_setup_rates] divfactor=%d\n") % divfactor;
 
     /* Tune the BBPLL to get the ADC and DAC clocks. */
     const double adcclk = _tune_bbvco(rate * divfactor);
@@ -1489,7 +1483,7 @@ double ad9361_device_t::_setup_rates(const double rate)
     _io_iface->poke8(0x004, _regs.inputsel);
     _io_iface->poke8(0x00A, _regs.bbpll);
 
-    UHD_LOG << boost::format("[ad9361_device_t::_setup_rates] adcclk=%f\n") % adcclk;
+    UHD_LOGGER_TRACE("AD936X")<< boost::format("[ad9361_device_t::_setup_rates] adcclk=%f\n") % adcclk;
     _baseband_bw = (adcclk / divfactor);
 
     /*
@@ -1520,7 +1514,7 @@ double ad9361_device_t::_setup_rates(const double rate)
  **********************************************************************/
 void ad9361_device_t::initialize()
 {
-    boost::lock_guard<boost::recursive_mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
 
     /* Initialize shadow registers. */
     _regs.vcodivs = 0x00;
@@ -1563,10 +1557,10 @@ void ad9361_device_t::initialize()
     /* Reset the device. */
     _io_iface->poke8(0x000, 0x01);
     _io_iface->poke8(0x000, 0x00);
-    boost::this_thread::sleep(boost::posix_time::milliseconds(20));
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
     /* Check device ID to make sure iface works */
-    boost::uint32_t device_id = (_io_iface->peek8(0x037) & 0x8);
+    uint32_t device_id = (_io_iface->peek8(0x037) & 0x8);
     if (device_id != 0x8) {
         throw uhd::runtime_error(str(boost::format("[ad9361_device_t::initialize] Device ID readback failure. Expected: 0x8, Received: 0x%x") % device_id));
     }
@@ -1583,11 +1577,11 @@ void ad9361_device_t::initialize()
 
     /* Enable clocks. */
     switch (_client_params->get_clocking_mode()) {
-    case AD9361_XTAL_N_CLK_PATH: {
+    case clocking_mode_t::AD9361_XTAL_N_CLK_PATH: {
         _io_iface->poke8(0x009, 0x17);
     } break;
 
-    case AD9361_XTAL_P_CLK_PATH: {
+    case clocking_mode_t::AD9361_XTAL_P_CLK_PATH: {
         _io_iface->poke8(0x009, 0x07);
         _io_iface->poke8(0x292, 0x08);
         _io_iface->poke8(0x293, 0x80);
@@ -1598,7 +1592,7 @@ void ad9361_device_t::initialize()
     default:
         throw uhd::runtime_error("[ad9361_device_t] NOT IMPLEMENTED");
     }
-    boost::this_thread::sleep(boost::posix_time::milliseconds(20));
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
     /* Tune the BBPLL, write TX and RX FIRS. */
     _setup_rates(50e6);
@@ -1631,9 +1625,9 @@ void ad9361_device_t::initialize()
     /* Data delay for TX and RX data clocks */
     digital_interface_delays_t timing =
             _client_params->get_digital_interface_timing();
-    boost::uint8_t rx_delays = ((timing.rx_clk_delay & 0xF) << 4)
+    uint8_t rx_delays = ((timing.rx_clk_delay & 0xF) << 4)
             | (timing.rx_data_delay & 0xF);
-    boost::uint8_t tx_delays = ((timing.tx_clk_delay & 0xF) << 4)
+    uint8_t tx_delays = ((timing.tx_clk_delay & 0xF) << 4)
             | (timing.tx_data_delay & 0xF);
     _io_iface->poke8(0x006, rx_delays);
     _io_iface->poke8(0x007, tx_delays);
@@ -1706,7 +1700,7 @@ void ad9361_device_t::initialize()
     _io_iface->poke8(0x015, 0x04); // dual synth mode, synth en ctrl en
     _io_iface->poke8(0x014, 0x05); // use SPI for TXNRX ctrl, to ALERT, TX on
     _io_iface->poke8(0x013, 0x01); // enable ENSM
-    boost::this_thread::sleep(boost::posix_time::milliseconds(1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
     _calibrate_synth_charge_pumps();
 
@@ -1792,13 +1786,13 @@ void ad9361_device_t::set_io_iface(ad9361_io::sptr io_iface)
  * This is the only clock setting function that is exposed to the outside. */
 double ad9361_device_t::set_clock_rate(const double req_rate)
 {
-    boost::lock_guard<boost::recursive_mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
 
     if (req_rate > 61.44e6) {
         throw uhd::runtime_error("[ad9361_device_t] Requested master clock rate outside range");
     }
 
-    UHD_LOG << boost::format("[ad9361_device_t::set_clock_rate] req_rate=%.10f\n") % req_rate;
+    UHD_LOGGER_TRACE("AD936X")<< boost::format("[ad9361_device_t::set_clock_rate] req_rate=%.10f\n") % req_rate;
 
     /* UHD has a habit of requesting the same rate like four times when it
      * starts up. This prevents that, and any bugs in user code that request
@@ -1811,12 +1805,12 @@ double ad9361_device_t::set_clock_rate(const double req_rate)
 
     /* We must be in the SLEEP / WAIT state to do this. If we aren't already
      * there, transition the ENSM to State 0. */
-    boost::uint8_t current_state = _io_iface->peek8(0x017) & 0x0F;
+    uint8_t current_state = _io_iface->peek8(0x017) & 0x0F;
     switch (current_state) {
     case 0x05:
         /* We are in the ALERT state. */
         _io_iface->poke8(0x014, 0x21);
-        boost::this_thread::sleep(boost::posix_time::milliseconds(5));
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
         _io_iface->poke8(0x014, 0x00);
         break;
 
@@ -1833,20 +1827,20 @@ double ad9361_device_t::set_clock_rate(const double req_rate)
     /* Store the current chain / antenna selections so that we can restore
      * them at the end of this routine; all chains will be enabled from
      * within setup_rates for calibration purposes. */
-    boost::uint8_t orig_tx_chains = _regs.txfilt & 0xC0;
-    boost::uint8_t orig_rx_chains = _regs.rxfilt & 0xC0;
+    uint8_t orig_tx_chains = _regs.txfilt & 0xC0;
+    uint8_t orig_rx_chains = _regs.rxfilt & 0xC0;
 
     /* Call into the clock configuration / settings function. This is where
      * all the hard work gets done. */
     double rate = _setup_rates(req_rate);
 
-    UHD_LOG << boost::format("[ad9361_device_t::set_clock_rate] rate=%.10f\n") % rate;
+    UHD_LOGGER_TRACE("AD936X")<< boost::format("[ad9361_device_t::set_clock_rate] rate=%.10f\n") % rate;
 
     /* Transition to the ALERT state and calibrate everything. */
     _io_iface->poke8(0x015, 0x04); //dual synth mode, synth en ctrl en
     _io_iface->poke8(0x014, 0x05); //use SPI for TXNRX ctrl, to ALERT, TX on
     _io_iface->poke8(0x013, 0x01); //enable ENSM
-    boost::this_thread::sleep(boost::posix_time::milliseconds(1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
     _calibrate_synth_charge_pumps();
 
@@ -1917,10 +1911,15 @@ double ad9361_device_t::set_clock_rate(const double req_rate)
         break;
     };
 
-    return rate;
+    return get_clock_rate();
 }
 
-
+/* This function returns the RX / TX rate between AD9361 and the FPGA.
+ */
+double ad9361_device_t::get_clock_rate()
+{
+    return _baseband_bw;
+}
 /* Set which of the four TX / RX chains provided by AD9361 are active.
  *
  * AD9361 provides two sets of chains, Side A and Side B. Each side
@@ -1941,7 +1940,7 @@ double ad9361_device_t::set_clock_rate(const double req_rate)
  */
 void ad9361_device_t::set_active_chains(bool tx1, bool tx2, bool rx1, bool rx2)
 {
-    boost::lock_guard<boost::recursive_mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
 
     /* Clear out the current active chain settings. */
     _regs.txfilt = _regs.txfilt & 0x3F;
@@ -1962,8 +1961,8 @@ void ad9361_device_t::set_active_chains(bool tx1, bool tx2, bool rx1, bool rx2)
     }
 
     /* Check for FDD state */
-    boost::uint8_t set_back_to_fdd = 0;
-    boost::uint8_t ensm_state = _io_iface->peek8(0x017) & 0x0F;
+    uint8_t set_back_to_fdd = 0;
+    uint8_t ensm_state = _io_iface->peek8(0x017) & 0x0F;
     if (ensm_state == 0xA)   // FDD
             {
         /* Put into ALERT state (via the FDD flush state). */
@@ -1992,6 +1991,48 @@ void ad9361_device_t::set_active_chains(bool tx1, bool tx2, bool rx1, bool rx2)
         _io_iface->poke8(0x014, 0x21);
 }
 
+/* Setup Timing mode depending on active channels.
+ *
+ * LVDS interface can have two timing modes - 1R1T and 2R2T
+ */
+void ad9361_device_t::set_timing_mode(const ad9361_device_t::timing_mode_t timing_mode)
+{
+    switch (_client_params->get_digital_interface_mode()) {
+    case AD9361_DDR_FDD_LVCMOS: {
+        switch(timing_mode) {
+        case TIMING_MODE_1R1T: {
+            _io_iface->poke8(0x010, 0xc8); // Swap I&Q on Tx, Swap I&Q on Rx, Toggle frame sync mode
+            break;
+        }
+        case TIMING_MODE_2R2T: {
+            throw uhd::runtime_error("[ad9361_device_t] [set_timing_mode] 2R2T timing mode not supported for CMOS");
+            break;
+        }
+        default:
+        UHD_THROW_INVALID_CODE_PATH();
+        }
+    break;
+    }
+    case AD9361_DDR_FDD_LVDS: {
+        switch(timing_mode) {
+        case TIMING_MODE_1R1T: {
+            _io_iface->poke8(0x010, 0xc8); // Swap I&Q on Tx, Swap I&Q on Rx, Toggle frame sync mode, 1R1T timing.
+            break;
+        }
+        case TIMING_MODE_2R2T: {
+            _io_iface->poke8(0x010, 0xcc); // Swap I&Q on Tx, Swap I&Q on Rx, Toggle frame sync mode, 2R2T timing.
+            break;
+        }
+        default:
+        UHD_THROW_INVALID_CODE_PATH();
+        }
+    break;
+    }
+    default:
+        throw uhd::runtime_error("[ad9361_device_t] NOT IMPLEMENTED");
+    }
+}
+
 /* Tune the RX or TX frequency.
  *
  * This is the publicly-accessible tune function. It makes sure the tune
@@ -2001,7 +2042,7 @@ void ad9361_device_t::set_active_chains(bool tx1, bool tx2, bool rx1, bool rx2)
  * After tuning, it runs any appropriate calibrations. */
 double ad9361_device_t::tune(direction_t direction, const double value)
 {
-    boost::lock_guard<boost::recursive_mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     double last_cal_freq;
 
     if (direction == RX) {
@@ -2068,13 +2109,13 @@ double ad9361_device_t::tune(direction_t direction, const double value)
         _io_iface->poke8(0x014, 0x21);
     }
 
-    return tune_freq;
+    return get_freq(direction);
 }
 
 /* Get the current RX or TX frequency. */
 double ad9361_device_t::get_freq(direction_t direction)
 {
-    boost::lock_guard<boost::recursive_mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
 
     if (direction == RX)
         return _rx_freq;
@@ -2089,7 +2130,7 @@ double ad9361_device_t::get_freq(direction_t direction)
  * the TX chains  are done in terms of attenuation. */
 double ad9361_device_t::set_gain(direction_t direction, chain_t chain, const double value)
 {
-    boost::lock_guard<boost::recursive_mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
 
     if (direction == RX) {
 
@@ -2124,7 +2165,7 @@ double ad9361_device_t::set_gain(direction_t direction, chain_t chain, const dou
          * outside this function.
          */
         double atten = AD9361_MAX_GAIN - value;
-        boost::uint32_t attenreg = boost::uint32_t(atten * 4);
+        uint32_t attenreg = uint32_t(atten * 4);
         if (chain == CHAIN_1) {
             _tx1_gain = value;
             _io_iface->poke8(0x073, attenreg & 0xFF);
@@ -2140,7 +2181,7 @@ double ad9361_device_t::set_gain(direction_t direction, chain_t chain, const dou
 
 void ad9361_device_t::output_test_tone()  // On RF side!
 {
-    boost::lock_guard<boost::recursive_mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     /* Output a 480 kHz tone at 800 MHz */
     _io_iface->poke8(0x3F4, 0x0B);
     _io_iface->poke8(0x3FC, 0xFF);
@@ -2150,13 +2191,13 @@ void ad9361_device_t::output_test_tone()  // On RF side!
 
 void ad9361_device_t::digital_test_tone(bool enb) // Digital output
 {
-    boost::lock_guard<boost::recursive_mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     _io_iface->poke8(0x3F4, 0x02 | (enb ? 0x01 : 0x00));
 }
 
 void ad9361_device_t::data_port_loopback(const bool loopback_enabled)
 {
-    boost::lock_guard<boost::recursive_mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     _io_iface->poke8(0x3F5, (loopback_enabled ? 0x01 : 0x00));
 }
 
@@ -2166,8 +2207,8 @@ void ad9361_device_t::data_port_loopback(const bool loopback_enabled)
  * -0.25dB / bit 9bit resolution.*/
 double ad9361_device_t::get_rssi(chain_t chain)
 {
-    boost::uint32_t reg_rssi = 0;
-    boost::uint8_t lsb_bit_pos = 0;
+    uint32_t reg_rssi = 0;
+    uint8_t lsb_bit_pos = 0;
     if (chain == CHAIN_1) {
         reg_rssi = 0x1A7;
         lsb_bit_pos = 0;
@@ -2175,9 +2216,9 @@ double ad9361_device_t::get_rssi(chain_t chain)
         reg_rssi = 0x1A9;
         lsb_bit_pos = 1;
     }
-    boost::uint8_t msbs = _io_iface->peek8(reg_rssi);
-    boost::uint8_t lsb = ((_io_iface->peek8(0x1AB)) >> lsb_bit_pos) & 0x01;
-    boost::uint16_t val = ((msbs << 1) | lsb);
+    uint8_t msbs = _io_iface->peek8(reg_rssi);
+    uint8_t lsb = ((_io_iface->peek8(0x1AB)) >> lsb_bit_pos) & 0x01;
+    uint16_t val = ((msbs << 1) | lsb);
     double rssi = (-0.25f * ((double)val)); //-0.25dB/lsb (See Gain Control Users Guide p. 25)
     return rssi;
 }
@@ -2190,26 +2231,26 @@ double ad9361_device_t::get_rssi(chain_t chain)
 double ad9361_device_t::_get_temperature(const double cal_offset, const double timeout)
 {
     //set 0x01D[0] to 1 to disable AuxADC GPIO reading
-    boost::uint8_t tmp = 0;
+    uint8_t tmp = 0;
     tmp = _io_iface->peek8(0x01D);
     _io_iface->poke8(0x01D, (tmp | 0x01));
     _io_iface->poke8(0x00B, 0); //set offset to 0
 
     _io_iface->poke8(0x00C, 0x01); //start reading, clears bit 0x00C[1]
-    boost::posix_time::ptime start_time = boost::posix_time::microsec_clock::local_time();
-    boost::posix_time::time_duration elapsed;
+    auto end_time =
+        std::chrono::steady_clock::now()
+        + std::chrono::milliseconds(int64_t(timeout * 1000));
     //wait for valid data (toggle of bit 1 in 0x00C)
     while(((_io_iface->peek8(0x00C) >> 1) & 0x01) == 0) {
-        boost::this_thread::sleep(boost::posix_time::microseconds(100));
-        elapsed = boost::posix_time::microsec_clock::local_time() - start_time;
-        if(elapsed.total_milliseconds() > (timeout*1000))
-        {
-            throw uhd::runtime_error("[ad9361_device_t] timeout while reading temperature");
+        std::this_thread::sleep_for(std::chrono::microseconds(100));
+        if (std::chrono::steady_clock::now() > end_time) {
+            throw uhd::runtime_error(
+                "[ad9361_device_t] timeout while reading temperature");
         }
     }
     _io_iface->poke8(0x00C, 0x00); //clear read flag
 
-    boost::uint8_t temp = _io_iface->peek8(0x00E); //read temperature.
+    uint8_t temp = _io_iface->peek8(0x00E); //read temperature.
     double tmp_temp = temp/1.140f; //according to ADI driver
     tmp_temp = tmp_temp + cal_offset; //Constant offset acquired by one point calibration.
 
@@ -2275,9 +2316,9 @@ void ad9361_device_t::set_iq_balance_auto(direction_t direction, const bool on)
  * the gain configuration will be reloaded. */
 void ad9361_device_t::_setup_agc(chain_t chain, gain_mode_t gain_mode)
 {
-    boost::uint8_t gain_mode_reg = 0;
-    boost::uint8_t gain_mode_prev = 0;
-    boost::uint8_t gain_mode_bits_pos = 0;
+    uint8_t gain_mode_reg = 0;
+    uint8_t gain_mode_prev = 0;
+    uint8_t gain_mode_bits_pos = 0;
 
     gain_mode_reg = _io_iface->peek8(0x0FA);
     gain_mode_prev = (gain_mode_reg & 0x0F);
@@ -2306,7 +2347,7 @@ void ad9361_device_t::_setup_agc(chain_t chain, gain_mode_t gain_mode)
             throw uhd::runtime_error("[ad9361_device_t] Gain mode does not exist");
     }
     _io_iface->poke8(0x0FA, gain_mode_reg);
-    boost::uint8_t gain_mode_status = _io_iface->peek8(0x0FA);
+    uint8_t gain_mode_status = _io_iface->peek8(0x0FA);
     gain_mode_status = (gain_mode_status & 0x0F);
     /*Check if gain mode configuration needs to be reprogrammed*/
     if (((gain_mode_prev == 0) && (gain_mode_status != 0)) || ((gain_mode_prev != 0) && (gain_mode_status == 0))) {
@@ -2362,88 +2403,100 @@ void ad9361_device_t::set_agc_mode(chain_t chain, gain_mode_t gain_mode)
 
 std::vector<std::string> ad9361_device_t::get_filter_names(direction_t direction)
 {
+    auto& filters = (direction == RX)
+        ? _rx_filters
+        : _tx_filters
+    ;
+
     std::vector<std::string> ret;
-    if(direction == RX) {
-        for(std::map<std::string, filter_query_helper>::iterator it = _rx_filters.begin(); it != _rx_filters.end(); ++it) {
-            ret.push_back(it->first);
-        }
-    } else if (direction == TX)
-    {
-        for(std::map<std::string, filter_query_helper>::iterator it = _tx_filters.begin(); it != _tx_filters.end(); ++it) {
-            ret.push_back(it->first);
-        }
+    ret.reserve(filters.size());
+    for (auto& filter : filters) {
+        ret.push_back(filter.first);
     }
+
     return ret;
 }
 
-filter_info_base::sptr ad9361_device_t::get_filter(direction_t direction, chain_t chain, const std::string &name)
-{
-    if(direction == RX) {
-        if (not _rx_filters[name].get)
-        {
-            throw uhd::runtime_error("ad9361_device_t::get_filter this filter can not be read.");
-        }
-        return _rx_filters[name].get(direction, chain);
-    } else if (direction == TX) {
-        if (not _tx_filters[name].get)
-        {
-            throw uhd::runtime_error("ad9361_device_t::get_filter this filter can not be read.");
-        }
-        return _tx_filters[name].get(direction, chain);
-    }
+filter_info_base::sptr ad9361_device_t::get_filter(
+        direction_t direction,
+        chain_t chain,
+        const std::string &name
+) {
+    auto& filters = (direction == RX)
+        ? _rx_filters
+        : _tx_filters
+    ;
 
-    throw uhd::runtime_error("ad9361_device_t::get_filter wrong direction parameter.");
+    if (!filters.count(name)) {
+        throw uhd::runtime_error(
+            "ad9361_device_t::get_filter this filter does not exist: " + name
+        );
+    }
+    // Check entry 0 in the tuple (the getter) exists before calling it
+    if (!std::get<0>(filters[name])) {
+        throw uhd::runtime_error(
+            "ad9361_device_t::get_filter this filter can not be read: " + name
+        );
+    }
+    return std::get<0>(filters[name])(chain);
 }
 
-void ad9361_device_t::set_filter(direction_t direction, chain_t chain, const std::string &name, filter_info_base::sptr filter)
-{
+void ad9361_device_t::set_filter(
+        direction_t direction,
+        chain_t chain,
+        const std::string &name,
+        filter_info_base::sptr filter
+) {
+    auto& filters = (direction == RX)
+        ? _rx_filters
+        : _tx_filters
+    ;
 
-    if(direction == RX) {
-        if(not _rx_filters[name].set)
-        {
-            throw uhd::runtime_error("ad9361_device_t::set_filter this filter can not be written.");
-        }
-        _rx_filters[name].set(direction, chain, filter);
-    } else if (direction == TX) {
-        if(not _tx_filters[name].set)
-        {
-            throw uhd::runtime_error("ad9361_device_t::set_filter this filter can not be written.");
-        }
-        _tx_filters[name].set(direction, chain, filter);
+    if (!filters.count(name)) {
+        throw uhd::runtime_error(
+            "ad9361_device_t::set_filter this filter does not exist: " + name
+        );
     }
-
+    // Check entry 1 in the tuple (the setter) exists before calling it
+    if (!std::get<1>(filters[name])) {
+        throw uhd::runtime_error(
+            "ad9361_device_t::set_filter this filter can not be written: " +
+            name
+        );
+    }
+    std::get<1>(filters[name])(chain, filter);
 }
 
 double ad9361_device_t::set_bw_filter(direction_t direction, const double rf_bw)
 {
     //both low pass filters are programmed to the same bw. However, their cutoffs will differ.
     //Together they should create the requested bb bw.
-    double set_analog_bb_bw = 0;
+    //Select rf_bw if it is between AD9361_MIN_BW & AD9361_MAX_BW.
+    const double clipped_bw = std::min(std::max(rf_bw, AD9361_MIN_BW), AD9361_MAX_BW);
     if(direction == RX)
     {
-        _rx_bb_lp_bw = _calibrate_baseband_rx_analog_filter(rf_bw); //returns bb bw
-        _rx_tia_lp_bw = _calibrate_rx_TIAs(rf_bw);
-        _rx_analog_bw = _rx_bb_lp_bw;
-        set_analog_bb_bw = _rx_analog_bw;
+        _rx_bb_lp_bw = _calibrate_baseband_rx_analog_filter(clipped_bw); //returns bb bw
+        _rx_tia_lp_bw = _calibrate_rx_TIAs(clipped_bw);
+        _rx_analog_bw = clipped_bw;
     } else {
-        _tx_bb_lp_bw = _calibrate_baseband_tx_analog_filter(rf_bw); //returns bb bw
-        _tx_sec_lp_bw = _calibrate_secondary_tx_filter(rf_bw);
-        _tx_analog_bw = _tx_bb_lp_bw;
-        set_analog_bb_bw = _tx_analog_bw;
+        _tx_bb_lp_bw = _calibrate_baseband_tx_analog_filter(clipped_bw); //returns bb bw
+        _tx_sec_lp_bw = _calibrate_secondary_tx_filter(clipped_bw);
+        _tx_analog_bw = clipped_bw;
     }
-    return (2.0 * set_analog_bb_bw);
+
+    return (clipped_bw);
 }
 
-void ad9361_device_t::_set_fir_taps(direction_t direction, chain_t chain, const std::vector<boost::int16_t>& taps)
+void ad9361_device_t::_set_fir_taps(direction_t direction, chain_t chain, const std::vector<int16_t>& taps)
 {
     size_t num_taps = taps.size();
     size_t num_taps_avail = _get_num_fir_taps(direction);
     if(num_taps == num_taps_avail)
     {
-        boost::scoped_array<boost::uint16_t> coeffs(new boost::uint16_t[num_taps_avail]);
+        boost::scoped_array<uint16_t> coeffs(new uint16_t[num_taps_avail]);
         for (size_t i = 0; i < num_taps_avail; i++)
         {
-            coeffs[i] = boost::uint16_t(taps[i]);
+            coeffs[i] = uint16_t(taps[i]);
         }
         _program_fir_filter(direction, chain, num_taps_avail, coeffs.get());
     } else if(num_taps < num_taps_avail){
@@ -2455,7 +2508,7 @@ void ad9361_device_t::_set_fir_taps(direction_t direction, chain_t chain, const 
 
 size_t ad9361_device_t::_get_num_fir_taps(direction_t direction)
 {
-    boost::uint8_t num = 0;
+    uint8_t num = 0;
     if(direction == RX)
         num = _io_iface->peek8(0x0F5);
     else
@@ -2466,7 +2519,7 @@ size_t ad9361_device_t::_get_num_fir_taps(direction_t direction)
 
 size_t ad9361_device_t::_get_fir_dec_int(direction_t direction)
 {
-    boost::uint8_t dec_int = 0;
+    uint8_t dec_int = 0;
     if(direction == RX)
         dec_int = _io_iface->peek8(0x003);
     else
@@ -2484,12 +2537,12 @@ size_t ad9361_device_t::_get_fir_dec_int(direction_t direction)
     return dec_int;
 }
 
-std::vector<boost::int16_t> ad9361_device_t::_get_fir_taps(direction_t direction, chain_t chain)
+std::vector<int16_t> ad9361_device_t::_get_fir_taps(direction_t direction, chain_t chain)
 {
     int base;
     size_t num_taps = _get_num_fir_taps(direction);
-    boost::uint8_t config;
-    boost::uint8_t reg_numtaps = (((num_taps / 16) - 1) & 0x07) << 5;
+    uint8_t config;
+    uint8_t reg_numtaps = (((num_taps / 16) - 1) & 0x07) << 5;
     config = reg_numtaps | 0x02; //start the programming clock
 
     if(chain == CHAIN_1)
@@ -2510,17 +2563,17 @@ std::vector<boost::int16_t> ad9361_device_t::_get_fir_taps(direction_t direction
 
     _io_iface->poke8(base+5,config);
 
-    std::vector<boost::int16_t> taps;
-    boost::uint8_t lower_val;
-    boost::uint8_t higher_val;
-    boost::uint16_t coeff;
+    std::vector<int16_t> taps;
+    uint8_t lower_val;
+    uint8_t higher_val;
+    uint16_t coeff;
     for(size_t i = 0;i < num_taps;i++)
     {
         _io_iface->poke8(base,0x00+i);
         lower_val = _io_iface->peek8(base+3);
         higher_val = _io_iface->peek8(base+4);
         coeff = ((higher_val << 8) | lower_val);
-        taps.push_back(boost::int16_t(coeff));
+        taps.push_back(int16_t(coeff));
     }
 
     config = (config & (~(1 << 1))); //disable filter clock
@@ -2569,16 +2622,18 @@ filter_info_base::sptr ad9361_device_t::_get_filter_lp_bb(direction_t direction)
  * For TX direction the INT3 is returned. */
 filter_info_base::sptr ad9361_device_t::_get_filter_dec_int_3(direction_t direction)
 {
-    boost::uint8_t enable = 0;
+    // clang-format off
+    uint8_t enable = 0;
     double rate = _adcclock_freq;
     double full_scale;
     size_t dec = 0;
     size_t interpol = 0;
     filter_info_base::filter_type type = filter_info_base::DIGITAL_I16;
     std::string name;
-    boost::int16_t taps_array_rx[] = {55, 83, 0, -393, -580, 0, 1914, 4041, 5120, 4041, 1914, 0, -580, -393, 0, 83, 55};
-    boost::int16_t taps_array_tx[] = {36, -19, 0, -156, -12, 0, 479, 233, 0, -1215, -993, 0, 3569, 6277, 8192, 6277, 3569, 0, -993, -1215, 0, 223, 479, 0, -12, -156, 0, -19, 36};
-    std::vector<boost::int16_t> taps;
+    int16_t taps_array_rx[] = {55, 83, 0, -393, -580, 0, 1914, 4041, 5120, 4041, 1914, 0, -580, -393, 0, 83, 55};
+    int16_t taps_array_tx[] = {36, -19, 0, -156, -12, 0, 479, 233, 0, -1215, -993, 0, 3569, 6277, 8192, 6277, 3569, 0, -993, -1215, 0, 223, 479, 0, -12, -156, 0, -19, 36};
+    std::vector<int16_t> taps;
+    // clang-format on
 
     filter_info_base::sptr ret;
 
@@ -2590,14 +2645,14 @@ filter_info_base::sptr ad9361_device_t::_get_filter_dec_int_3(direction_t direct
 
         enable = _io_iface->peek8(0x003);
         enable = ((enable >> 4) & 0x03);
-        taps.assign(taps_array_rx, taps_array_rx + sizeof(taps_array_rx) / sizeof(boost::int16_t) );
+        taps.assign(taps_array_rx, taps_array_rx + sizeof(taps_array_rx) / sizeof(int16_t) );
 
     } else {
         full_scale = 8192;
         dec = 1;
         interpol = 3;
 
-        boost::uint8_t use_dac_clk_div = _io_iface->peek8(0x00A);
+        uint8_t use_dac_clk_div = _io_iface->peek8(0x00A);
         use_dac_clk_div = ((use_dac_clk_div >> 3) & 0x01);
         if(use_dac_clk_div == 1)
         {
@@ -2611,24 +2666,24 @@ filter_info_base::sptr ad9361_device_t::_get_filter_dec_int_3(direction_t direct
             rate /= 3;
         }
 
-        taps.assign(taps_array_tx, taps_array_tx + sizeof(taps_array_tx) / sizeof(boost::int16_t) );
+        taps.assign(taps_array_tx, taps_array_tx + sizeof(taps_array_tx) / sizeof(int16_t) );
     }
 
-    ret = filter_info_base::sptr(new digital_filter_base<boost::int16_t>(type, (enable != 2) ? true : false, 2, rate, interpol, dec, full_scale, taps.size(), taps));
+    ret = filter_info_base::sptr(new digital_filter_base<int16_t>(type, (enable != 2) ? true : false, 2, rate, interpol, dec, full_scale, taps.size(), taps));
     return  ret;
 }
 
 filter_info_base::sptr ad9361_device_t::_get_filter_hb_3(direction_t direction)
 {
-    boost::uint8_t enable = 0;
+    uint8_t enable = 0;
     double rate = _adcclock_freq;
     double full_scale = 0;
     size_t dec = 1;
     size_t interpol = 1;
     filter_info_base::filter_type type = filter_info_base::DIGITAL_I16;
-    boost::int16_t taps_array_rx[] = {1, 4, 6, 4, 1};
-    boost::int16_t taps_array_tx[] = {1, 2, 1};
-    std::vector<boost::int16_t> taps;
+    int16_t taps_array_rx[] = {1, 4, 6, 4, 1};
+    int16_t taps_array_tx[] = {1, 2, 1};
+    std::vector<int16_t> taps;
 
     if(direction == RX)
     {
@@ -2637,12 +2692,12 @@ filter_info_base::sptr ad9361_device_t::_get_filter_hb_3(direction_t direction)
 
         enable = _io_iface->peek8(0x003);
         enable = ((enable >> 4) & 0x03);
-        taps.assign(taps_array_rx, taps_array_rx + sizeof(taps_array_rx) / sizeof(boost::int16_t) );
+        taps.assign(taps_array_rx, taps_array_rx + sizeof(taps_array_rx) / sizeof(int16_t) );
     } else {
         full_scale = 2;
         interpol = 2;
 
-        boost::uint8_t use_dac_clk_div = _io_iface->peek8(0x00A);
+        uint8_t use_dac_clk_div = _io_iface->peek8(0x00A);
         use_dac_clk_div = ((use_dac_clk_div >> 3) & 0x01);
         if(use_dac_clk_div == 1)
         {
@@ -2655,26 +2710,26 @@ filter_info_base::sptr ad9361_device_t::_get_filter_hb_3(direction_t direction)
         {
             rate /= 2;
         }
-        taps.assign(taps_array_tx, taps_array_tx + sizeof(taps_array_tx) / sizeof(boost::int16_t) );
+        taps.assign(taps_array_tx, taps_array_tx + sizeof(taps_array_tx) / sizeof(int16_t) );
     }
 
-    filter_info_base::sptr hb = filter_info_base::sptr(new digital_filter_base<boost::int16_t>(type, (enable != 1) ? true : false, 2, rate, interpol, dec, full_scale, taps.size(), taps));
+    filter_info_base::sptr hb = filter_info_base::sptr(new digital_filter_base<int16_t>(type, (enable != 1) ? true : false, 2, rate, interpol, dec, full_scale, taps.size(), taps));
     return  hb;
 }
 
 filter_info_base::sptr ad9361_device_t::_get_filter_hb_2(direction_t direction)
 {
-    boost::uint8_t enable = 0;
+    uint8_t enable = 0;
     double rate = _adcclock_freq;
     double full_scale = 0;
     size_t dec = 1;
     size_t interpol = 1;
     filter_info_base::filter_type type = filter_info_base::DIGITAL_I16;
-    boost::int16_t taps_array[] = {-9, 0, 73, 128, 73, 0, -9};
-    std::vector<boost::int16_t> taps(taps_array, taps_array + sizeof(taps_array) / sizeof(boost::int16_t) );
+    int16_t taps_array[] = {-9, 0, 73, 128, 73, 0, -9};
+    std::vector<int16_t> taps(taps_array, taps_array + sizeof(taps_array) / sizeof(int16_t) );
 
-    digital_filter_base<boost::int16_t>::sptr hb_3 = boost::dynamic_pointer_cast<digital_filter_base<boost::int16_t> >(_get_filter_hb_3(direction));
-    digital_filter_base<boost::int16_t>::sptr dec_int_3 = boost::dynamic_pointer_cast<digital_filter_base<boost::int16_t> >(_get_filter_dec_int_3(direction));
+    digital_filter_base<int16_t>::sptr hb_3 = boost::dynamic_pointer_cast<digital_filter_base<int16_t> >(_get_filter_hb_3(direction));
+    digital_filter_base<int16_t>::sptr dec_int_3 = boost::dynamic_pointer_cast<digital_filter_base<int16_t> >(_get_filter_dec_int_3(direction));
 
     if(direction == RX)
     {
@@ -2714,24 +2769,24 @@ filter_info_base::sptr ad9361_device_t::_get_filter_hb_2(direction_t direction)
         }
     }
 
-    filter_info_base::sptr hb(new digital_filter_base<boost::int16_t>(type, (enable == 0) ? true : false, 3, rate, interpol, dec, full_scale, taps.size(), taps));
+    filter_info_base::sptr hb(new digital_filter_base<int16_t>(type, (enable == 0) ? true : false, 3, rate, interpol, dec, full_scale, taps.size(), taps));
     return  hb;
 }
 
 filter_info_base::sptr ad9361_device_t::_get_filter_hb_1(direction_t direction)
 {
-    boost::uint8_t enable = 0;
+    uint8_t enable = 0;
     double rate = 0;
     double full_scale = 0;
     size_t dec = 1;
     size_t interpol = 1;
     filter_info_base::filter_type type = filter_info_base::DIGITAL_I16;
 
-    std::vector<boost::int16_t> taps;
-    boost::int16_t taps_rx_array[] = {-8, 0, 42, 0, -147, 0, 619, 1013, 619, 0, -147, 0, 42, 0, -8};
-    boost::int16_t taps_tx_array[] = {-53, 0, 313, 0, -1155, 0, 4989, 8192, 4989, 0, -1155, 0, 313, 0, -53};
+    std::vector<int16_t> taps;
+    int16_t taps_rx_array[] = {-8, 0, 42, 0, -147, 0, 619, 1013, 619, 0, -147, 0, 42, 0, -8};
+    int16_t taps_tx_array[] = {-53, 0, 313, 0, -1155, 0, 4989, 8192, 4989, 0, -1155, 0, 313, 0, -53};
 
-    digital_filter_base<boost::int16_t>::sptr hb_2 = boost::dynamic_pointer_cast<digital_filter_base<boost::int16_t> >(_get_filter_hb_2(direction));
+    digital_filter_base<int16_t>::sptr hb_2 = boost::dynamic_pointer_cast<digital_filter_base<int16_t> >(_get_filter_hb_2(direction));
 
     if(direction == RX)
     {
@@ -2740,7 +2795,7 @@ filter_info_base::sptr ad9361_device_t::_get_filter_hb_1(direction_t direction)
         enable = _io_iface->peek8(0x003);
         enable = ((enable >> 2) & 0x01);
         rate = hb_2->get_output_rate();
-        taps.assign(taps_rx_array, taps_rx_array + sizeof(taps_rx_array) / sizeof(boost::int16_t) );
+        taps.assign(taps_rx_array, taps_rx_array + sizeof(taps_rx_array) / sizeof(int16_t) );
     } else if (direction == TX) {
         full_scale = 8192;
         interpol = 2;
@@ -2751,10 +2806,10 @@ filter_info_base::sptr ad9361_device_t::_get_filter_hb_1(direction_t direction)
         {
             rate /= 2;
         }
-        taps.assign(taps_tx_array, taps_tx_array + sizeof(taps_tx_array) / sizeof(boost::int16_t) );
+        taps.assign(taps_tx_array, taps_tx_array + sizeof(taps_tx_array) / sizeof(int16_t) );
     }
 
-    filter_info_base::sptr hb(new digital_filter_base<boost::int16_t>(type, (enable == 0) ? true : false, 4, rate, interpol, dec, full_scale, taps.size(), taps));
+    filter_info_base::sptr hb(new digital_filter_base<int16_t>(type, (enable == 0) ? true : false, 4, rate, interpol, dec, full_scale, taps.size(), taps));
     return  hb;
 }
 
@@ -2764,9 +2819,9 @@ filter_info_base::sptr ad9361_device_t::_get_filter_fir(direction_t direction, c
     size_t dec = 1;
     size_t interpol = 1;
     size_t max_num_taps = 128;
-    boost::uint8_t enable = 1;
+    uint8_t enable = 1;
 
-    digital_filter_base<boost::int16_t>::sptr hb_1 = boost::dynamic_pointer_cast<digital_filter_base<boost::int16_t> >(_get_filter_hb_1(direction));
+    digital_filter_base<int16_t>::sptr hb_1 = boost::dynamic_pointer_cast<digital_filter_base<int16_t> >(_get_filter_hb_1(direction));
 
     if(direction == RX)
     {
@@ -2794,14 +2849,14 @@ filter_info_base::sptr ad9361_device_t::_get_filter_fir(direction_t direction, c
     }
     max_num_taps = _get_num_fir_taps(direction);
 
-    filter_info_base::sptr fir(new digital_filter_fir<boost::int16_t>(filter_info_base::DIGITAL_FIR_I16, (enable == 0) ? true : false, 5, rate, interpol, dec, 32767, max_num_taps, _get_fir_taps(direction, chain)));
+    filter_info_base::sptr fir(new digital_filter_fir<int16_t>(filter_info_base::DIGITAL_FIR_I16, (enable == 0) ? true : false, 5, rate, interpol, dec, 32767, max_num_taps, _get_fir_taps(direction, chain)));
 
     return fir;
 }
 
 void ad9361_device_t::_set_filter_fir(direction_t direction, chain_t channel, filter_info_base::sptr filter)
 {
-    digital_filter_fir<boost::int16_t>::sptr fir = boost::dynamic_pointer_cast<digital_filter_fir<boost::int16_t> >(filter);
+    digital_filter_fir<int16_t>::sptr fir = boost::dynamic_pointer_cast<digital_filter_fir<int16_t> >(filter);
     //only write taps. Ignore everything else for now
     _set_fir_taps(direction, channel, fir->get_taps());
 }

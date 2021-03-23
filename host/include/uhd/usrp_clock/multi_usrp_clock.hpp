@@ -1,32 +1,21 @@
 //
 // Copyright 2014 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #ifndef INCLUDED_UHD_MULTI_USRP_CLOCK_HPP
 #define INCLUDED_UHD_MULTI_USRP_CLOCK_HPP
 
-#include <string>
-#include <vector>
-
 #include <uhd/config.hpp>
 #include <uhd/device.hpp>
 #include <uhd/types/device_addr.hpp>
 #include <uhd/types/sensors.hpp>
+#include <string>
+#include <vector>
 
-namespace uhd{ namespace usrp_clock{
+namespace uhd { namespace usrp_clock {
 
 /*!
  * The Multi-USRP-Clock device class:
@@ -53,7 +42,8 @@ namespace uhd{ namespace usrp_clock{
  * multi_usrp_clock::sptr clock = multi_usrp_clock::make(dev);
  * </pre>
  */
-class UHD_API multi_usrp_clock : boost::noncopyable {
+class UHD_API multi_usrp_clock : boost::noncopyable
+{
 public:
     typedef boost::shared_ptr<multi_usrp_clock> sptr;
 
@@ -64,7 +54,7 @@ public:
      * \param dev_addr the device address
      * \return a new Multi-USRP-Clock object
      */
-    static sptr make(const device_addr_t &dev_addr);
+    static sptr make(const device_addr_t& dev_addr);
 
     /*!
      * Return the underlying device.
@@ -83,7 +73,7 @@ public:
     virtual size_t get_num_boards(void) = 0;
 
     //! Get time from device
-    virtual boost::uint32_t get_time(size_t board = 0) = 0;
+    virtual uint32_t get_time(size_t board = 0) = 0;
 
     /*!
      * Get a USRP Clock sensor value.
@@ -91,7 +81,7 @@ public:
      * \param board the board index (0 to M-1)
      * \return a sensor value object
      */
-    virtual sensor_value_t get_sensor(const std::string &name, size_t board = 0) = 0;
+    virtual sensor_value_t get_sensor(const std::string& name, size_t board = 0) = 0;
 
     /*!
      * Get a list of possible USRP Clock sensor names.
@@ -101,7 +91,6 @@ public:
     virtual std::vector<std::string> get_sensor_names(size_t board = 0) = 0;
 };
 
-} //namespace
-} //namespace
+}} // namespace uhd::usrp_clock
 
 #endif /* INCLUDED_UHD_MULTI_USRP_CLOCK_HPP */

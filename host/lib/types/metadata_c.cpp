@@ -1,18 +1,8 @@
 //
 // Copyright 2015 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include <uhd/types/metadata.h>
@@ -53,7 +43,7 @@ uhd_error uhd_rx_metadata_has_time_spec(
 
 uhd_error uhd_rx_metadata_time_spec(
     uhd_rx_metadata_handle h,
-    time_t *full_secs_out,
+    int64_t *full_secs_out,
     double *frac_secs_out
 ){
     UHD_SAFE_C_SAVE_ERROR(h,
@@ -159,7 +149,7 @@ uhd_error uhd_rx_metadata_last_error(
 uhd_error uhd_tx_metadata_make(
     uhd_tx_metadata_handle* handle,
     bool has_time_spec,
-    time_t full_secs,
+    int64_t full_secs,
     double frac_secs,
     bool start_of_burst,
     bool end_of_burst
@@ -195,7 +185,7 @@ uhd_error uhd_tx_metadata_has_time_spec(
 
 uhd_error uhd_tx_metadata_time_spec(
     uhd_tx_metadata_handle h,
-    time_t *full_secs_out,
+    int64_t *full_secs_out,
     double *frac_secs_out
 ){
     UHD_SAFE_C_SAVE_ERROR(h,
@@ -275,7 +265,7 @@ uhd_error uhd_async_metadata_has_time_spec(
 
 uhd_error uhd_async_metadata_time_spec(
     uhd_async_metadata_handle h,
-    time_t *full_secs_out,
+    int64_t *full_secs_out,
     double *frac_secs_out
 ){
     UHD_SAFE_C_SAVE_ERROR(h,

@@ -1,23 +1,14 @@
 //
 // Copyright 2010-2016 Ettus Research LLC
+// Copyright 2018 Ettus Research, a National Instruments Company
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 #include <uhd/property_tree.hpp>
+#include <uhd/types/eeprom.hpp>
 #include <uhd/usrp/multi_usrp.hpp>
-#include <uhd/utils/msg.hpp>
+#include <uhd/usrp/gpio_defs.hpp>
 #include <uhd/exception.hpp>
 #include <uhd/utils/log.hpp>
 #include <uhd/utils/math.hpp>
@@ -27,18 +18,22 @@
 #include <uhd/usrp/dboard_eeprom.hpp>
 #include <uhd/convert.hpp>
 #include <uhd/utils/soft_register.hpp>
-#include "legacy_compat.hpp"
+#include <uhdlib/usrp/gpio_defs.hpp>
+#include <uhdlib/rfnoc/legacy_compat.hpp>
 #include <boost/assign/list_of.hpp>
-#include <boost/thread.hpp>
-#include <boost/foreach.hpp>
 #include <boost/format.hpp>
 #include <boost/algorithm/string.hpp>
 #include <algorithm>
 #include <cmath>
+#include <bitset>
+#include <chrono>
+#include <thread>
 
 using namespace uhd;
 using namespace uhd::usrp;
 
+const size_t multi_usrp::ALL_MBOARDS = size_t(~0);
+const size_t multi_usrp::ALL_CHANS = size_t(~0);
 const std::string multi_usrp::ALL_GAINS = "";
 const std::string multi_usrp::ALL_LOS = "all";
 
@@ -66,7 +61,7 @@ static void do_samp_rate_warning_message(
 ){
     static const double max_allowed_error = 1.0; //Sps
     if (std::abs(target_rate - actual_rate) > max_allowed_error){
-        UHD_MSG(warning) << boost::format(
+        UHD_LOGGER_WARNING("MULTI_USRP") << boost::format(
             "The hardware does not support the requested %s sample rate:\n"
             "Target sample rate: %f MSps\n"
             "Actual sample rate: %f MSps\n"
@@ -97,7 +92,7 @@ static void do_samp_rate_warning_message(
 
     if(requested_freq_success and target_freq_success and rf_lo_tune_success
             and dsp_tune_success) {
-        UHD_MSG(status) << boost::format(
+        UHD_LOGGER_INFO("MULTI_USRP") << boost::format(
                 "Successfully tuned to %f MHz\n\n")
                 % (actual_freq / 1e6);
     } else {
@@ -120,7 +115,7 @@ static void do_samp_rate_warning_message(
 
             results_string += rf_lo_message.str();
 
-            UHD_MSG(status) << results_string;
+            UHD_LOGGER_INFO("MULTI_USRP") << results_string;
 
             return;
         }
@@ -174,7 +169,7 @@ static void do_samp_rate_warning_message(
             results_string += failure_message.str();
         }
 
-        UHD_MSG(warning) << results_string << std::endl;
+        UHD_LOGGER_WARNING("MULTI_USRP") << results_string ;
     }
 }*/
 
@@ -190,7 +185,7 @@ static meta_range_t make_overall_tune_range(
     const double bw
 ){
     meta_range_t range;
-    BOOST_FOREACH(const range_t &sub_range, fe_range){
+    for(const range_t &sub_range:  fe_range){
         range.push_back(range_t(
             sub_range.start() + std::max(dsp_range.start(), -bw/2),
             sub_range.stop() + std::min(dsp_range.stop(), bw/2),
@@ -262,7 +257,8 @@ static tune_result_t tune_xx_subdev_and_dsp(
      * tune_request. This lo_offset is based on the requirements of the FE, and
      * does not reflect a user-requested lo_offset, which is handled later. */
     double lo_offset = 0.0;
-    if (rf_fe_subtree->access<bool>("use_lo_offset").get()){
+    if (rf_fe_subtree->exists("use_lo_offset") and
+        rf_fe_subtree->access<bool>("use_lo_offset").get()){
         // If the frontend has lo_offset value and range properties, trust it
         // for lo_offset
         if (rf_fe_subtree->exists("lo_offset/value")) {
@@ -393,7 +389,7 @@ public:
         _tree = _dev->get_tree();
         _is_device3 = bool(boost::dynamic_pointer_cast<uhd::device3>(_dev));
 
-        if (is_device3()) {
+        if (is_device3() and not addr.has_key("recover_mb_eeprom")) {
             _legacy_compat = rfnoc::legacy_compat::make(get_device3(), addr);
         }
     }
@@ -416,38 +412,82 @@ public:
     dict<std::string, std::string> get_usrp_rx_info(size_t chan){
         mboard_chan_pair mcp = rx_chan_to_mcp(chan);
         dict<std::string, std::string> usrp_info;
-
-        mboard_eeprom_t mb_eeprom = _tree->access<mboard_eeprom_t>(mb_root(mcp.mboard) / "eeprom").get();
-        dboard_eeprom_t db_eeprom = _tree->access<dboard_eeprom_t>(rx_rf_fe_root(chan).branch_path().branch_path() / "rx_eeprom").get();
-
+        const auto mb_eeprom =
+            _tree->access<mboard_eeprom_t>(mb_root(mcp.mboard) / "eeprom").get();
         usrp_info["mboard_id"] = _tree->access<std::string>(mb_root(mcp.mboard) / "name").get();
-        usrp_info["mboard_name"] = mb_eeprom["name"];
+        usrp_info["mboard_name"] = mb_eeprom.get("name", "n/a");
         usrp_info["mboard_serial"] = mb_eeprom["serial"];
-        usrp_info["rx_id"] = db_eeprom.id.to_pp_string();
         usrp_info["rx_subdev_name"] = _tree->access<std::string>(rx_rf_fe_root(chan) / "name").get();
         usrp_info["rx_subdev_spec"] = _tree->access<subdev_spec_t>(mb_root(mcp.mboard) / "rx_subdev_spec").get().to_string();
-        usrp_info["rx_serial"] = db_eeprom.serial;
         usrp_info["rx_antenna"] =  _tree->access<std::string>(rx_rf_fe_root(chan) / "antenna" / "value").get();
-
+        if (_tree->exists(rx_rf_fe_root(chan).branch_path().branch_path() / "rx_eeprom")) {
+            const auto db_eeprom =
+                _tree->access<dboard_eeprom_t>(
+                        rx_rf_fe_root(chan).branch_path().branch_path()
+                        / "rx_eeprom"
+                ).get();
+            usrp_info["rx_serial"] = db_eeprom.serial;
+            usrp_info["rx_id"] = db_eeprom.id.to_pp_string();
+        }
+        const auto rfnoc_path = mb_root(mcp.mboard) / "xbar";
+        if (_tree->exists(rfnoc_path)) {
+            const auto spec = get_rx_subdev_spec(mcp.mboard).at(mcp.chan);
+            const auto radio_index = get_radio_index(spec.db_name);
+            const auto radio_path = rfnoc_path / str(boost::format("Radio_%d") % radio_index);
+            const auto eeprom_path = radio_path / "eeprom";
+            if (_tree->exists(eeprom_path)) {
+                const auto db_eeprom = _tree->access<eeprom_map_t>(eeprom_path).get();
+                usrp_info["rx_serial"] = db_eeprom.count("serial") ?
+                    std::string(db_eeprom.at("serial").begin(), db_eeprom.at("serial").end())
+                    : "n/a"
+                ;
+                usrp_info["rx_id"] = db_eeprom.count("pid") ?
+                   std::string(db_eeprom.at("pid").begin(), db_eeprom.at("pid").end())
+                   : "n/a"
+                ;
+            }
+        }
         return usrp_info;
     }
 
     dict<std::string, std::string> get_usrp_tx_info(size_t chan){
         mboard_chan_pair mcp = tx_chan_to_mcp(chan);
         dict<std::string, std::string> usrp_info;
-
-        mboard_eeprom_t mb_eeprom = _tree->access<mboard_eeprom_t>(mb_root(mcp.mboard) / "eeprom").get();
-        dboard_eeprom_t db_eeprom = _tree->access<dboard_eeprom_t>(tx_rf_fe_root(chan).branch_path().branch_path() / "tx_eeprom").get();
-
+        const auto mb_eeprom =
+            _tree->access<mboard_eeprom_t>(mb_root(mcp.mboard) / "eeprom").get();
         usrp_info["mboard_id"] = _tree->access<std::string>(mb_root(mcp.mboard) / "name").get();
-        usrp_info["mboard_name"] = mb_eeprom["name"];
+        usrp_info["mboard_name"] = mb_eeprom.get("name", "n/a");
         usrp_info["mboard_serial"] = mb_eeprom["serial"];
-        usrp_info["tx_id"] = db_eeprom.id.to_pp_string();
         usrp_info["tx_subdev_name"] = _tree->access<std::string>(tx_rf_fe_root(chan) / "name").get();
         usrp_info["tx_subdev_spec"] = _tree->access<subdev_spec_t>(mb_root(mcp.mboard) / "tx_subdev_spec").get().to_string();
-        usrp_info["tx_serial"] = db_eeprom.serial;
         usrp_info["tx_antenna"] = _tree->access<std::string>(tx_rf_fe_root(chan) / "antenna" / "value").get();
-
+        if (_tree->exists(tx_rf_fe_root(chan).branch_path().branch_path() / "tx_eeprom")) {
+            const auto db_eeprom =
+                _tree->access<dboard_eeprom_t>(
+                        tx_rf_fe_root(chan).branch_path().branch_path()
+                        / "tx_eeprom"
+                ).get();
+            usrp_info["tx_serial"] = db_eeprom.serial;
+            usrp_info["tx_id"] = db_eeprom.id.to_pp_string();
+        }
+        const auto rfnoc_path = mb_root(mcp.mboard) / "xbar";
+        if (_tree->exists(rfnoc_path)) {
+            const auto spec = get_tx_subdev_spec(mcp.mboard).at(mcp.chan);
+            const auto radio_index = get_radio_index(spec.db_name);
+            const auto radio_path = rfnoc_path / str(boost::format("Radio_%d")%radio_index);
+            const auto path = radio_path / "eeprom";
+            if(_tree->exists(path)) {
+                const auto db_eeprom = _tree->access<eeprom_map_t>(path).get();
+                usrp_info["tx_serial"] = db_eeprom.count("serial") ?
+                    std::string(db_eeprom.at("serial").begin(), db_eeprom.at("serial").end())
+                    : "n/a"
+                ;
+                usrp_info["tx_id"] = db_eeprom.count("pid") ?
+                   std::string(db_eeprom.at("pid").begin(), db_eeprom.at("pid").end())
+                   : "n/a"
+                ;
+            }
+        }
         return usrp_info;
     }
 
@@ -459,7 +499,7 @@ public:
             if (_tree->exists(mb_root(mboard) / "auto_tick_rate")
                     and _tree->access<bool>(mb_root(mboard) / "auto_tick_rate").get()) {
                 _tree->access<bool>(mb_root(mboard) / "auto_tick_rate").set(false);
-                UHD_MSG(status) << "Setting master clock rate selection to 'manual'." << std::endl;
+                UHD_LOGGER_INFO("MULTI_USRP") << "Setting master clock rate selection to 'manual'.";
             }
             _tree->access<double>(mb_root(mboard) / "tick_rate").set(rate);
             return;
@@ -471,6 +511,23 @@ public:
 
     double get_master_clock_rate(size_t mboard){
         return _tree->access<double>(mb_root(mboard) / "tick_rate").get();
+    }
+
+    meta_range_t get_master_clock_rate_range(const size_t mboard)
+    {
+        if (_tree->exists(mb_root(mboard) / "tick_rate/range")) {
+            return _tree->access<meta_range_t>(
+                mb_root(mboard) / "tick_rate/range"
+            ).get();
+        }
+        // The USRP may not have a range defined, in which case we create a
+        // fake range with a single value:
+        const double tick_rate = get_master_clock_rate(mboard);
+        return meta_range_t(
+            tick_rate,
+            tick_rate,
+            0
+        );
     }
 
     std::string get_pp_string(void){
@@ -557,32 +614,34 @@ public:
     }
 
     void set_time_unknown_pps(const time_spec_t &time_spec){
-        UHD_MSG(status) << "    1) catch time transition at pps edge" << std::endl;
-        boost::system_time end_time = boost::get_system_time() + boost::posix_time::milliseconds(1100);
+        UHD_LOGGER_INFO("MULTI_USRP")
+            << "    1) catch time transition at pps edge";
+        auto end_time = std::chrono::steady_clock::now()
+                            + std::chrono::milliseconds(1100);
         time_spec_t time_start_last_pps = get_time_last_pps();
         while (time_start_last_pps == get_time_last_pps())
         {
-            if (boost::get_system_time() > end_time)
-            {
+            if (std::chrono::steady_clock::now() > end_time) {
                 throw uhd::runtime_error(
                     "Board 0 may not be getting a PPS signal!\n"
                     "No PPS detected within the time interval.\n"
                     "See the application notes for your device.\n"
                 );
             }
-            boost::this_thread::sleep(boost::posix_time::milliseconds(1));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
 
-        UHD_MSG(status) << "    2) set times next pps (synchronously)" << std::endl;
+        UHD_LOGGER_INFO("MULTI_USRP")
+            << "    2) set times next pps (synchronously)";
         set_time_next_pps(time_spec, ALL_MBOARDS);
-        boost::this_thread::sleep(boost::posix_time::seconds(1));
+        std::this_thread::sleep_for(std::chrono::seconds(1));
 
         //verify that the time registers are read to be within a few RTT
         for (size_t m = 1; m < get_num_mboards(); m++){
             time_spec_t time_0 = this->get_time_now(0);
             time_spec_t time_i = this->get_time_now(m);
             if (time_i < time_0 or (time_i - time_0) > time_spec_t(0.01)){ //10 ms: greater than RTT but not too big
-                UHD_MSG(warning) << boost::format(
+                UHD_LOGGER_WARNING("MULTI_USRP") << boost::format(
                     "Detected time deviation between board %d and board 0.\n"
                     "Board 0 time is %f seconds.\n"
                     "Board %d time is %f seconds.\n"
@@ -663,7 +722,20 @@ public:
 
     void set_time_source(const std::string &source, const size_t mboard){
         if (mboard != ALL_MBOARDS){
-            _tree->access<std::string>(mb_root(mboard) / "time_source" / "value").set(source);
+            const auto time_source_path =
+                mb_root(mboard) / "time_source/value";
+            const auto sync_source_path =
+                mb_root(mboard) / "sync_source/value";
+            if (_tree->exists(time_source_path)) {
+                _tree->access<std::string>(time_source_path).set(source);
+            } else if (_tree->exists(sync_source_path)) {
+                auto sync_source =
+                    _tree->access<device_addr_t>(sync_source_path).get();
+                sync_source["time_source"] = source;
+                _tree->access<device_addr_t>(sync_source_path).set(sync_source);
+            } else {
+                throw uhd::runtime_error("Can't set time source on this device.");
+            }
             return;
         }
         for (size_t m = 0; m < get_num_mboards(); m++){
@@ -672,16 +744,53 @@ public:
     }
 
     std::string get_time_source(const size_t mboard){
-        return _tree->access<std::string>(mb_root(mboard) / "time_source" / "value").get();
+        const auto time_source_path = mb_root(mboard) / "time_source/value";
+        if (_tree->exists(time_source_path)) {
+            return _tree->access<std::string>(time_source_path).get();
+        } else if (_tree->exists(mb_root(mboard) / "sync_source/value")) {
+            auto sync_source = _tree->access<device_addr_t>(
+                mb_root(mboard) / "sync_source" / "value").get();
+            if (sync_source.has_key("time_source")) {
+                return sync_source.get("time_source");
+            }
+        }
+        throw uhd::runtime_error("Cannot query time_source on this device!");
     }
 
     std::vector<std::string> get_time_sources(const size_t mboard){
-        return _tree->access<std::vector<std::string> >(mb_root(mboard) / "time_source" / "options").get();
+        const auto time_source_path = mb_root(mboard) / "time_source/options";
+        if (_tree->exists(time_source_path)) {
+            return _tree->access<std::vector<std::string>>(time_source_path)
+                .get();
+        } else if (_tree->exists(mb_root(mboard) / "sync_source/options")) {
+            const auto sync_sources = get_sync_sources(mboard);
+            std::vector<std::string> time_sources;
+            for (const auto& sync_source : sync_sources) {
+                if (sync_source.has_key("time_source")) {
+                    time_sources.push_back(sync_source.get("time_source"));
+                }
+            }
+        }
+        throw uhd::runtime_error("Cannot query time_source on this device!");
     }
 
     void set_clock_source(const std::string &source, const size_t mboard){
         if (mboard != ALL_MBOARDS){
-            _tree->access<std::string>(mb_root(mboard) / "clock_source" / "value").set(source);
+            const auto clock_source_path =
+                mb_root(mboard) / "clock_source/value";
+            const auto sync_source_path =
+                mb_root(mboard) / "sync_source/value";
+            if (_tree->exists(clock_source_path)) {
+                _tree->access<std::string>(clock_source_path).set(source);
+            } else if (_tree->exists(sync_source_path)) {
+                auto sync_source =
+                    _tree->access<device_addr_t>(sync_source_path).get();
+                sync_source["clock_source"] = source;
+                _tree->access<device_addr_t>(sync_source_path).set(sync_source);
+            } else {
+                throw uhd::runtime_error(
+                    "Can't set clock source on this device.");
+            }
             return;
         }
         for (size_t m = 0; m < get_num_mboards(); m++){
@@ -690,11 +799,115 @@ public:
     }
 
     std::string get_clock_source(const size_t mboard){
-        return _tree->access<std::string>(mb_root(mboard) / "clock_source" / "value").get();
+        const auto clock_source_path = mb_root(mboard) / "clock_source/value";
+        if (_tree->exists(clock_source_path)) {
+            return _tree->access<std::string>(
+                    mb_root(mboard) / "clock_source" / "value").get();
+        } else if (_tree->exists(mb_root(mboard) / "sync_source/value")) {
+            auto sync_source = _tree->access<device_addr_t>(
+                mb_root(mboard) / "sync_source" / "value").get();
+            if (sync_source.has_key("clock_source")) {
+                return sync_source.get("clock_source");
+            }
+        }
+        throw uhd::runtime_error("Cannot query clock_source on this device!");
+    }
+
+    void set_sync_source(
+        const std::string &clock_source,
+        const std::string &time_source,
+        const size_t mboard
+    ) {
+        device_addr_t sync_args;
+        sync_args["clock_source"] = clock_source;
+        sync_args["time_source"] = time_source;
+        set_sync_source(sync_args, mboard);
+    }
+
+    void set_sync_source(
+        const device_addr_t& sync_source,
+        const size_t mboard
+    ) {
+        if (mboard != ALL_MBOARDS) {
+            const auto sync_source_path =
+                mb_root(mboard) / "sync_source/value";
+            if (_tree->exists(sync_source_path)) {
+                _tree->access<device_addr_t>(sync_source_path)
+                    .set(sync_source);
+            } else if (_tree->exists(mb_root(mboard) / "clock_source/value")
+                    and _tree->exists(mb_root(mboard) / "time_source/value")
+                    and sync_source.has_key("clock_source")
+                    and sync_source.has_key("time_source")) {
+                const std::string clock_source = sync_source["clock_source"];
+                const std::string time_source = sync_source["time_source"];
+                set_clock_source(clock_source, mboard);
+                set_time_source(time_source, mboard);
+            } else {
+                throw uhd::runtime_error(
+                    "Can't set sync source on this device.");
+            }
+            return;
+        }
+        for (size_t m = 0; m < get_num_mboards(); m++){
+            this->set_sync_source(sync_source, m);
+        }
+
+    }
+
+    device_addr_t get_sync_source(const size_t mboard)
+    {
+        const auto sync_source_path = mb_root(mboard) / "sync_source/value";
+        if (_tree->exists(sync_source_path)) {
+            return _tree->access<device_addr_t>(sync_source_path).get();
+        }
+        // If this path is not there, we fall back to the oldschool method and
+        // convert to a new-fangled sync source dictionary
+        const std::string clock_source = get_clock_source(mboard);
+        const std::string time_source = get_time_source(mboard);
+        device_addr_t sync_source;
+        sync_source["clock_source"] = clock_source;
+        sync_source["time_source"] = time_source;
+        return sync_source;
+    }
+
+    std::vector<device_addr_t> get_sync_sources(const size_t mboard)
+    {
+        const auto sync_source_path = mb_root(mboard) / "sync_source/options";
+        if (_tree->exists(sync_source_path)) {
+            return _tree->access<std::vector<device_addr_t>>(sync_source_path).get();
+        }
+        // If this path is not there, we fall back to the oldschool method and
+        // convert to a new-fangled sync source dictionary
+        const auto clock_sources = get_clock_sources(mboard);
+        const auto time_sources = get_time_sources(mboard);
+        std::vector<device_addr_t> sync_sources;
+        for (const auto& clock_source : clock_sources) {
+            for (const auto& time_source : time_sources) {
+                device_addr_t sync_source;
+                sync_source["clock_source"] = clock_source;
+                sync_source["time_source"] = time_source;
+                sync_sources.push_back(sync_source);
+            }
+        }
+
+        return sync_sources;
     }
 
     std::vector<std::string> get_clock_sources(const size_t mboard){
-        return _tree->access<std::vector<std::string> >(mb_root(mboard) / "clock_source" / "options").get();
+        const auto clock_source_path = mb_root(mboard) / "clock_source/options";
+        if (_tree->exists(clock_source_path)) {
+            return _tree->access<std::vector<std::string>>(clock_source_path)
+                .get();
+        } else if (_tree->exists(mb_root(mboard) / "sync_source/options")) {
+            const auto sync_sources = get_sync_sources(mboard);
+            std::vector<std::string> clock_sources;
+            for (const auto& sync_source : sync_sources) {
+                if (sync_source.has_key("clock_source")) {
+                    clock_sources.push_back(sync_source.get("clock_source"));
+                }
+            }
+        }
+        throw uhd::runtime_error("Cannot query clock_source on this device!");
     }
 
     void set_clock_source_out(const bool enb, const size_t mboard)
@@ -746,18 +959,33 @@ public:
     }
 
     std::vector<std::string> get_mboard_sensor_names(size_t mboard){
-        return _tree->list(mb_root(mboard) / "sensors");
+        if (_tree->exists(mb_root(mboard) / "sensors")) {
+            return _tree->list(mb_root(mboard) / "sensors");
+        }
+        return {};
     }
 
-    void set_user_register(const boost::uint8_t addr, const boost::uint32_t data, size_t mboard){
+    void set_user_register(const uint8_t addr, const uint32_t data, size_t mboard){
         if (mboard != ALL_MBOARDS){
-            typedef std::pair<boost::uint8_t, boost::uint32_t> user_reg_t;
+            typedef std::pair<uint8_t, uint32_t> user_reg_t;
             _tree->access<user_reg_t>(mb_root(mboard) / "user/regs").set(user_reg_t(addr, data));
             return;
         }
         for (size_t m = 0; m < get_num_mboards(); m++){
             set_user_register(addr, data, m);
         }
+    }
+
+    wb_iface::sptr get_user_settings_iface(const size_t chan)
+    {
+        const auto user_settings_path =
+            rx_rf_fe_root(chan) / "user_settings" / "iface";
+        if (_tree->exists(user_settings_path)) {
+            return _tree->access<wb_iface::sptr>(user_settings_path).get();
+        }
+        UHD_LOG_WARNING("MULTI_USRP",
+            "Attempting to read back non-existant user settings iface!");
+        return nullptr;
     }
 
     /*******************************************************************
@@ -797,7 +1025,7 @@ public:
             {
                 throw uhd::index_error(str(boost::format("multi_usrp::get_rx_subdev_spec(%u) failed to make default spec - %s") % mboard % e.what()));
             }
-            UHD_MSG(status) << "Selecting default RX front end spec: " << spec.to_pp_string() << std::endl;
+            UHD_LOGGER_INFO("MULTI_USRP") << "Selecting default RX front end spec: " << spec.to_pp_string();
         }
         return spec;
     }
@@ -815,6 +1043,18 @@ public:
     }
 
     void set_rx_rate(double rate, size_t chan){
+        if (is_device3()) {
+            _legacy_compat->set_rx_rate(rate, chan);
+            if (chan == ALL_CHANS) {
+                for (size_t c = 0; c < get_rx_num_channels(); c++){
+                    do_samp_rate_warning_message(rate, get_rx_rate(c), "RX");
+                }
+            } else {
+                do_samp_rate_warning_message(rate, get_rx_rate(chan), "RX");
+            }
+            return;
+        }
+
         if (chan != ALL_CHANS){
             _tree->access<double>(rx_dsp_root(chan) / "rate" / "value").set(rate);
             do_samp_rate_warning_message(rate, get_rx_rate(chan), "RX");
@@ -834,6 +1074,27 @@ public:
     }
 
     tune_result_t set_rx_freq(const tune_request_t &tune_request, size_t chan){
+
+        // If any mixer is driven by an external LO the daughterboard assumes that no CORDIC correction is
+        // necessary. Since the LO might be sourced from another daughterboard which would normally apply a
+        // cordic correction a manual DSP tune policy should be used to ensure identical configurations across
+        // daughterboards.
+        if (tune_request.dsp_freq_policy == tune_request.POLICY_AUTO and
+            tune_request.rf_freq_policy  == tune_request.POLICY_AUTO)
+        {
+            for (size_t c = 0; c < get_rx_num_channels(); c++) {
+                const bool external_all_los = _tree->exists(rx_rf_fe_root(chan) / "los" / ALL_LOS)
+                                              && get_rx_lo_source(ALL_LOS, c) == "external";
+                if (external_all_los) {
+                    UHD_LOGGER_WARNING("MULTI_USRP")
+                            << "At least one channel is using an external LO."
+                            << "Using a manual DSP frequency policy is recommended to ensure "
+                            << "the same frequency shift on all channels.";
+                    break;
+                }
+            }
+        }
+
         tune_result_t result = tune_xx_subdev_and_dsp(RX_SIGN,
                 _tree->subtree(rx_dsp_root(chan)),
                 _tree->subtree(rx_rf_fe_root(chan)),
@@ -858,10 +1119,13 @@ public:
         return _tree->access<meta_range_t>(rx_rf_fe_root(chan) / "freq" / "range").get();
     }
 
+    /**************************************************************************
+     * LO controls
+     *************************************************************************/
     std::vector<std::string> get_rx_lo_names(size_t chan = 0){
         std::vector<std::string> lo_names;
         if (_tree->exists(rx_rf_fe_root(chan) / "los")) {
-            BOOST_FOREACH(const std::string &name, _tree->list(rx_rf_fe_root(chan) / "los")) {
+            for(const std::string &name:  _tree->list(rx_rf_fe_root(chan) / "los")) {
                 lo_names.push_back(name);
             }
         }
@@ -875,7 +1139,7 @@ public:
                     //Special value ALL_LOS support atomically sets the source for all LOs
                     _tree->access<std::string>(rx_rf_fe_root(chan) / "los" / ALL_LOS / "source" / "value").set(src);
                 } else {
-                    BOOST_FOREACH(const std::string &n, _tree->list(rx_rf_fe_root(chan) / "los")) {
+                    for(const std::string &n:  _tree->list(rx_rf_fe_root(chan) / "los")) {
                         this->set_rx_lo_source(src, n, chan);
                     }
                 }
@@ -938,7 +1202,7 @@ public:
                     //Special value ALL_LOS support atomically sets the source for all LOs
                     _tree->access<bool>(rx_rf_fe_root(chan) / "los" / ALL_LOS / "export").set(enabled);
                 } else {
-                    BOOST_FOREACH(const std::string &n, _tree->list(rx_rf_fe_root(chan) / "los")) {
+                    for(const std::string &n:  _tree->list(rx_rf_fe_root(chan) / "los")) {
                         this->set_rx_lo_export_enabled(enabled, n, chan);
                     }
                 }
@@ -1023,13 +1287,230 @@ public:
         }
     }
 
+    std::vector<std::string> get_tx_lo_names(const size_t chan = 0){
+        std::vector<std::string> lo_names;
+        if (_tree->exists(tx_rf_fe_root(chan) / "los")) {
+            for (const std::string &name : _tree->list(tx_rf_fe_root(chan) / "los")) {
+                lo_names.push_back(name);
+            }
+        }
+        return lo_names;
+    }
+
+    void set_tx_lo_source(
+            const std::string &src,
+            const std::string &name = ALL_LOS,
+            const size_t chan = 0
+    ) {
+        if (_tree->exists(tx_rf_fe_root(chan) / "los")) {
+            if (name == ALL_LOS) {
+                if (_tree->exists(tx_rf_fe_root(chan) / "los" / ALL_LOS)) {
+                    // Special value ALL_LOS support atomically sets the source
+                    // for all LOs
+                    _tree->access<std::string>(
+                            tx_rf_fe_root(chan) / "los" / ALL_LOS /
+                            "source" / "value"
+                    ).set(src);
+                } else {
+                    for (const auto &n : _tree->list(tx_rf_fe_root(chan) / "los")) {
+                        this->set_tx_lo_source(src, n, chan);
+                    }
+                }
+            } else {
+                if (_tree->exists(tx_rf_fe_root(chan) / "los")) {
+                    _tree->access<std::string>(
+                        tx_rf_fe_root(chan) / "los" / name / "source" /
+                            "value"
+                    ).set(src);
+                } else {
+                    throw uhd::runtime_error("Could not find LO stage " + name);
+                }
+            }
+        } else {
+            throw uhd::runtime_error("This device does not support manual "
+                                     "configuration of LOs");
+        }
+    }
+
+    const std::string get_tx_lo_source(
+            const std::string &name = ALL_LOS,
+            const size_t chan = 0
+    ) {
+        if (_tree->exists(tx_rf_fe_root(chan) / "los")) {
+            if (_tree->exists(tx_rf_fe_root(chan) / "los")) {
+                return _tree->access<std::string>(
+                    tx_rf_fe_root(chan) / "los" / name / "source" / "value"
+                ).get();
+            } else {
+                throw uhd::runtime_error("Could not find LO stage " + name);
+            }
+        } else {
+            // If the daughterboard doesn't expose its LO(s) then it can only
+            // be internal
+            return "internal";
+        }
+    }
+
+    std::vector<std::string> get_tx_lo_sources(
+            const std::string &name = ALL_LOS,
+            const size_t chan = 0
+    ) {
+        if (_tree->exists(tx_rf_fe_root(chan) / "los")) {
+            if (name == ALL_LOS) {
+                if (_tree->exists(tx_rf_fe_root(chan) / "los" / ALL_LOS)) {
+                    // Special value ALL_LOS support atomically sets the source
+                    // for all LOs
+                    return _tree->access<std::vector<std::string>>(
+                        tx_rf_fe_root(chan) / "los" / ALL_LOS /
+                            "source" / "options"
+                    ).get();
+                } else {
+                    return std::vector<std::string>();
+                }
+            } else {
+                if (_tree->exists(tx_rf_fe_root(chan) / "los")) {
+                    return _tree->access< std::vector<std::string> >(tx_rf_fe_root(chan) / "los" / name / "source" / "options").get();
+                } else {
+                    throw uhd::runtime_error("Could not find LO stage " + name);
+                }
+            }
+        } else {
+            // If the daughterboard doesn't expose its LO(s) then it can only
+            // be internal
+            return std::vector<std::string>(1, "internal");
+        }
+    }
+
+    void set_tx_lo_export_enabled(
+            const bool enabled,
+            const std::string &name = ALL_LOS,
+            const size_t chan=0
+    ) {
+        if (_tree->exists(tx_rf_fe_root(chan) / "los")) {
+            if (name == ALL_LOS) {
+                if (_tree->exists(tx_rf_fe_root(chan) / "los" / ALL_LOS)) {
+                    //Special value ALL_LOS support atomically sets the source for all LOs
+                    _tree->access<bool>(tx_rf_fe_root(chan) / "los" / ALL_LOS / "export").set(enabled);
+                } else {
+                    for(const std::string &n:  _tree->list(tx_rf_fe_root(chan) / "los")) {
+                        this->set_tx_lo_export_enabled(enabled, n, chan);
+                    }
+                }
+            } else {
+                if (_tree->exists(tx_rf_fe_root(chan) / "los")) {
+                    _tree->access<bool>(tx_rf_fe_root(chan) / "los" / name / "export").set(enabled);
+                } else {
+                    throw uhd::runtime_error("Could not find LO stage " + name);
+                }
+            }
+        } else {
+            throw uhd::runtime_error("This device does not support manual configuration of LOs");
+        }
+    }
+
+    bool get_tx_lo_export_enabled(
+            const std::string &name = ALL_LOS,
+            const size_t chan = 0
+    ) {
+        if (_tree->exists(tx_rf_fe_root(chan) / "los")) {
+            if (_tree->exists(tx_rf_fe_root(chan) / "los")) {
+                return _tree->access<bool>(
+                    tx_rf_fe_root(chan) / "los" / name / "export"
+                ).get();
+            } else {
+                throw uhd::runtime_error("Could not find LO stage " + name);
+            }
+        } else {
+            // If the daughterboard doesn't expose its LO(s), assume it cannot
+            // export
+            return false;
+        }
+    }
+
+    double set_tx_lo_freq(
+            const double freq,
+            const std::string &name = ALL_LOS,
+            const size_t chan = 0
+    ) {
+        if (_tree->exists(tx_rf_fe_root(chan) / "los")) {
+            if (name == ALL_LOS) {
+                throw uhd::runtime_error("LO frequency must be set for each "
+                                         "stage individually");
+            } else {
+                if (_tree->exists(tx_rf_fe_root(chan) / "los")) {
+                    return _tree->access<double>(
+                        tx_rf_fe_root(chan) / "los" / name / "freq" / "value"
+                    ).set(freq).get();
+                } else {
+                    throw uhd::runtime_error("Could not find LO stage " + name);
+                }
+            }
+        } else {
+            throw uhd::runtime_error("This device does not support manual "
+                                     "configuration of LOs");
+        }
+    }
+
+    double get_tx_lo_freq(
+            const std::string &name = ALL_LOS,
+            const size_t chan = 0
+    ) {
+        if (_tree->exists(tx_rf_fe_root(chan) / "los")) {
+            if (name == ALL_LOS) {
+                throw uhd::runtime_error("LO frequency must be retrieved for "
+                                         "each stage individually");
+            } else {
+                if (_tree->exists(tx_rf_fe_root(chan) / "los")) {
+                    return _tree->access<double>(tx_rf_fe_root(chan) / "los" / name / "freq" / "value").get();
+                } else {
+                    throw uhd::runtime_error("Could not find LO stage " + name);
+                }
+            }
+        } else {
+            // Return actual RF frequency if the daughterboard doesn't expose
+            // its LO(s)
+            return _tree->access<double>(
+                tx_rf_fe_root(chan) / "freq" /" value"
+            ).get();
+        }
+    }
+
+    freq_range_t get_tx_lo_freq_range(
+            const std::string &name = ALL_LOS,
+            const size_t chan = 0
+    ) {
+        if (_tree->exists(tx_rf_fe_root(chan) / "los")) {
+            if (name == ALL_LOS) {
+                throw uhd::runtime_error("LO frequency range must be retrieved "
+                                         "for each stage individually");
+            } else {
+                if (_tree->exists(tx_rf_fe_root(chan) / "los")) {
+                    return _tree->access<freq_range_t>(
+                        tx_rf_fe_root(chan) / "los" / name / "freq" / "range"
+                    ).get();
+                } else {
+                    throw uhd::runtime_error("Could not find LO stage " + name);
+                }
+            }
+        } else {
+            // Return the actual RF range if the daughterboard doesn't expose
+            // its LO(s)
+            return _tree->access<meta_range_t>(
+                tx_rf_fe_root(chan) / "freq" / "range"
+            ).get();
+        }
+    }
+
+    /**************************************************************************
+     * Gain control
+     *************************************************************************/
     void set_rx_gain(double gain, const std::string &name, size_t chan){
         /* Check if any AGC mode is enable and if so warn the user */
         if (chan != ALL_CHANS) {
             if (_tree->exists(rx_rf_fe_root(chan) / "gain" / "agc")) {
                 bool agc = _tree->access<bool>(rx_rf_fe_root(chan) / "gain" / "agc" / "enable").get();
                 if(agc) {
-                    UHD_MSG(warning) << "AGC enabled for this channel. Setting will be ignored." << std::endl;
+                    UHD_LOGGER_WARNING("MULTI_USRP") << "AGC enabled for this channel. Setting will be ignored." ;
                 }
             }
         } else {
@@ -1037,7 +1518,7 @@ public:
                 if (_tree->exists(rx_rf_fe_root(c) / "gain" / "agc")) {
                     bool agc = _tree->access<bool>(rx_rf_fe_root(chan) / "gain" / "agc" / "enable").get();
                     if(agc) {
-                        UHD_MSG(warning) << "AGC enabled for this channel. Setting will be ignored." << std::endl;
+                        UHD_LOGGER_WARNING("MULTI_USRP") << "AGC enabled for this channel. Setting will be ignored." ;
                     }
                 }
             }
@@ -1051,14 +1532,61 @@ public:
         }
     }
 
+    void set_rx_gain_profile(const std::string& profile, const size_t chan){
+        if (chan != ALL_CHANS) {
+            if (_tree->exists(rx_rf_fe_root(chan) / "gains/all/profile/value")) {
+                _tree->access<std::string>(rx_rf_fe_root(chan) / "gains/all/profile/value").set(profile);
+            }
+        } else {
+            for (size_t c = 0; c < get_rx_num_channels(); c++){
+                if (_tree->exists(rx_rf_fe_root(c) / "gains/all/profile/value")) {
+                    _tree->access<std::string>(rx_rf_fe_root(chan) / "gains/all/profile/value").set(profile);
+                }
+            }
+        }
+    }
+
+    std::string get_rx_gain_profile(const size_t chan)
+    {
+        if (chan != ALL_CHANS) {
+            if (_tree->exists(rx_rf_fe_root(chan) / "gains/all/profile/value")) {
+                return _tree->access<std::string>(
+                    rx_rf_fe_root(chan) / "gains/all/profile/value"
+                ).get();
+            }
+        } else {
+            throw uhd::runtime_error("Can't get RX gain profile from "
+                                     "all channels at once!");
+        }
+        return "";
+    }
+
+    std::vector<std::string> get_rx_gain_profile_names(const size_t chan)
+    {
+        if (chan != ALL_CHANS) {
+            if (_tree->exists(rx_rf_fe_root(chan) / "gains/all/profile/options")) {
+                return _tree->access<std::vector<std::string>>(
+                    rx_rf_fe_root(chan) / "gains/all/profile/options"
+                ).get();
+            }
+        } else {
+            throw uhd::runtime_error("Can't get RX gain profile names from "
+                                     "all channels at once!");
+        }
+        return std::vector<std::string>();
+    }
+
     void set_normalized_rx_gain(double gain, size_t chan = 0)
     {
-      if (gain > 1.0 || gain < 0.0) {
-        throw uhd::runtime_error("Normalized gain out of range, must be in [0, 1].");
-      }
-      gain_range_t gain_range = get_rx_gain_range(ALL_GAINS, chan);
-      double abs_gain = (gain * (gain_range.stop() - gain_range.start())) + gain_range.start();
-      set_rx_gain(abs_gain, ALL_GAINS, chan);
+        if (gain > 1.0 || gain < 0.0) {
+            throw uhd::runtime_error("Normalized gain out of range, "
+                                     "must be in [0, 1].");
+        }
+        const gain_range_t gain_range = get_rx_gain_range(ALL_GAINS, chan);
+        const double abs_gain =
+            (gain * (gain_range.stop() - gain_range.start()))
+            + gain_range.start();
+        set_rx_gain(abs_gain, ALL_GAINS, chan);
     }
 
     void set_rx_agc(bool enable, size_t chan = 0)
@@ -1067,7 +1595,7 @@ public:
             if (_tree->exists(rx_rf_fe_root(chan) / "gain" / "agc" / "enable")) {
                 _tree->access<bool>(rx_rf_fe_root(chan) / "gain" / "agc" / "enable").set(enable);
             } else {
-                UHD_MSG(warning) << "AGC is not available on this device." << std::endl;
+                UHD_LOGGER_WARNING("MULTI_USRP") << "AGC is not available on this device." ;
             }
             return;
         }
@@ -1145,7 +1673,11 @@ public:
     }
 
     std::vector<std::string> get_rx_sensor_names(size_t chan){
-        return _tree->list(rx_rf_fe_root(chan) / "sensors");
+        std::vector<std::string> sensor_names;
+        if (_tree->exists(rx_rf_fe_root(chan) / "sensors")) {
+            sensor_names = _tree->list(rx_rf_fe_root(chan) / "sensors");
+        }
+        return sensor_names;
     }
 
     void set_rx_dc_offset(const bool enb, size_t chan){
@@ -1156,7 +1688,7 @@ public:
                 /*For B2xx devices the dc-offset correction is implemented in the rf front-end*/
                 _tree->access<bool>(rx_rf_fe_root(chan) / "dc_offset" / "enable").set(enb);
             } else {
-                UHD_MSG(warning) << "Setting DC offset compensation is not possible on this device." << std::endl;
+                UHD_LOGGER_WARNING("MULTI_USRP") << "Setting DC offset compensation is not possible on this device." ;
             }
             return;
         }
@@ -1170,7 +1702,7 @@ public:
             if (_tree->exists(rx_fe_root(chan) / "dc_offset" / "value")) {
                 _tree->access<std::complex<double> >(rx_fe_root(chan) / "dc_offset" / "value").set(offset);
             } else {
-                UHD_MSG(warning) << "Setting DC offset is not possible on this device." << std::endl;
+                UHD_LOGGER_WARNING("MULTI_USRP") << "Setting DC offset is not possible on this device." ;
             }
             return;
         }
@@ -1179,12 +1711,21 @@ public:
         }
     }
 
+    meta_range_t get_rx_dc_offset_range(size_t chan) {
+        if (_tree->exists(rx_fe_root(chan) / "dc_offset" / "range")) {
+            return _tree->access<uhd::meta_range_t>(rx_fe_root(chan) / "dc_offset" / "range").get();
+        } else {
+            UHD_LOGGER_WARNING("MULTI_USRP") << "This device does not support querying the RX DC offset range." ;
+            return meta_range_t(0, 0);
+        }
+    }
+
     void set_rx_iq_balance(const bool enb, size_t chan){
         if (chan != ALL_CHANS){
             if (_tree->exists(rx_rf_fe_root(chan) / "iq_balance" / "enable")) {
                 _tree->access<bool>(rx_rf_fe_root(chan) / "iq_balance" / "enable").set(enb);
             } else {
-                UHD_MSG(warning) << "Setting IQ imbalance compensation is not possible on this device." << std::endl;
+                UHD_LOGGER_WARNING("MULTI_USRP") << "Setting IQ imbalance compensation is not possible on this device." ;
             }
             return;
         }
@@ -1198,7 +1739,7 @@ public:
             if (_tree->exists(rx_fe_root(chan) / "iq_balance" / "value")) {
                 _tree->access<std::complex<double> >(rx_fe_root(chan) / "iq_balance" / "value").set(offset);
             } else {
-                UHD_MSG(warning) << "Setting IQ balance is not possible on this device." << std::endl;
+                UHD_LOGGER_WARNING("MULTI_USRP") << "Setting IQ balance is not possible on this device." ;
             }
             return;
         }
@@ -1325,7 +1866,7 @@ public:
             {
                 throw uhd::index_error(str(boost::format("multi_usrp::get_tx_subdev_spec(%u) failed to make default spec - %s") % mboard % e.what()));
             }
-            UHD_MSG(status) << "Selecting default TX front end spec: " << spec.to_pp_string() << std::endl;
+            UHD_LOGGER_INFO("MULTI_USRP") << "Selecting default TX front end spec: " << spec.to_pp_string();
         }
         return spec;
     }
@@ -1343,6 +1884,18 @@ public:
     }
 
     void set_tx_rate(double rate, size_t chan){
+        if (is_device3()) {
+            _legacy_compat->set_tx_rate(rate, chan);
+            if (chan == ALL_CHANS) {
+                for (size_t c = 0; c < get_tx_num_channels(); c++){
+                    do_samp_rate_warning_message(rate, get_tx_rate(c), "TX");
+                }
+            } else {
+                do_samp_rate_warning_message(rate, get_tx_rate(chan), "TX");
+            }
+            return;
+        }
+
         if (chan != ALL_CHANS){
             _tree->access<double>(tx_dsp_root(chan) / "rate" / "value").set(rate);
             do_samp_rate_warning_message(rate, get_tx_rate(chan), "TX");
@@ -1394,6 +1947,50 @@ public:
         }
     }
 
+    void set_tx_gain_profile(const std::string& profile, const size_t chan){
+        if (chan != ALL_CHANS) {
+            if (_tree->exists(tx_rf_fe_root(chan) / "gains/all/profile/value")) {
+                _tree->access<std::string>(tx_rf_fe_root(chan) / "gains/all/profile/value").set(profile);
+            }
+        } else {
+            for (size_t c = 0; c < get_tx_num_channels(); c++){
+                if (_tree->exists(tx_rf_fe_root(c) / "gains/all/profile/value")) {
+                    _tree->access<std::string>(tx_rf_fe_root(chan) / "gains/all/profile/value").set(profile);
+                }
+            }
+        }
+    }
+
+    std::string get_tx_gain_profile(const size_t chan)
+    {
+        if (chan != ALL_CHANS) {
+            if (_tree->exists(tx_rf_fe_root(chan) / "gains/all/profile/value")) {
+                return _tree->access<std::string>(
+                    tx_rf_fe_root(chan) / "gains/all/profile/value"
+                ).get();
+            }
+        } else {
+            throw uhd::runtime_error("Can't get TX gain profile from "
+                                     "all channels at once!");
+        }
+        return "";
+    }
+
+    std::vector<std::string> get_tx_gain_profile_names(const size_t chan)
+    {
+        if (chan != ALL_CHANS) {
+            if (_tree->exists(tx_rf_fe_root(chan) / "gains/all/profile/options")) {
+                return _tree->access<std::vector<std::string>>(
+                    tx_rf_fe_root(chan) / "gains/all/profile/options"
+                ).get();
+            }
+        } else {
+            throw uhd::runtime_error("Can't get TX gain profile names from "
+                                     "all channels at once!");
+        }
+        return std::vector<std::string>();
+    }
+
     void set_normalized_tx_gain(double gain, size_t chan = 0)
     {
       if (gain > 1.0 || gain < 0.0) {
@@ -1421,7 +2018,7 @@ public:
       if (gain_range_width == 0.0) {
           return 0.0;
       }
-      double norm_gain = (get_rx_gain(ALL_GAINS, chan) - gain_range.start()) / gain_range_width;
+      double norm_gain = (get_tx_gain(ALL_GAINS, chan) - gain_range.start()) / gain_range_width;
       // Avoid rounding errors:
       if (norm_gain > 1.0) return 1.0;
       if (norm_gain < 0.0) return 0.0;
@@ -1473,7 +2070,11 @@ public:
     }
 
     std::vector<std::string> get_tx_sensor_names(size_t chan){
-        return _tree->list(tx_rf_fe_root(chan) / "sensors");
+        std::vector<std::string> sensor_names;
+        if (_tree->exists(rx_rf_fe_root(chan) / "sensors")) {
+            sensor_names = _tree->list(tx_rf_fe_root(chan) / "sensors");
+        }
+        return sensor_names;
     }
 
     void set_tx_dc_offset(const std::complex<double> &offset, size_t chan){
@@ -1481,7 +2082,7 @@ public:
             if (_tree->exists(tx_fe_root(chan) / "dc_offset" / "value")) {
                 _tree->access<std::complex<double> >(tx_fe_root(chan) / "dc_offset" / "value").set(offset);
             } else {
-                UHD_MSG(warning) << "Setting DC offset is not possible on this device." << std::endl;
+                UHD_LOGGER_WARNING("MULTI_USRP") << "Setting DC offset is not possible on this device." ;
             }
             return;
         }
@@ -1490,12 +2091,21 @@ public:
         }
     }
 
+    meta_range_t get_tx_dc_offset_range(size_t chan) {
+        if (_tree->exists(tx_fe_root(chan) / "dc_offset" / "range")) {
+            return _tree->access<uhd::meta_range_t>(tx_fe_root(chan) / "dc_offset" / "range").get();
+        } else {
+            UHD_LOGGER_WARNING("MULTI_USRP") << "This device does not support querying the TX DC offset range." ;
+            return meta_range_t(0, 0);
+        }
+    }
+
     void set_tx_iq_balance(const std::complex<double> &offset, size_t chan){
         if (chan != ALL_CHANS){
             if (_tree->exists(tx_fe_root(chan) / "iq_balance" / "value")) {
                 _tree->access<std::complex<double> >(tx_fe_root(chan) / "iq_balance" / "value").set(offset);
             } else {
-                UHD_MSG(warning) << "Setting IQ balance is not possible on this device." << std::endl;
+                UHD_LOGGER_WARNING("MULTI_USRP") << "Setting IQ balance is not possible on this device." ;
             }
             return;
         }
@@ -1512,12 +2122,12 @@ public:
         std::vector<std::string> banks;
         if (_tree->exists(mb_root(mboard) / "gpio"))
         {
-            BOOST_FOREACH(const std::string &name, _tree->list(mb_root(mboard) / "gpio"))
+            for(const std::string &name:  _tree->list(mb_root(mboard) / "gpio"))
             {
                 banks.push_back(name);
             }
         }
-        BOOST_FOREACH(const std::string &name, _tree->list(mb_root(mboard) / "dboards"))
+        for(const std::string &name:  _tree->list(mb_root(mboard) / "dboards"))
         {
             banks.push_back("RX"+name);
             banks.push_back("TX"+name);
@@ -1525,54 +2135,250 @@ public:
         return banks;
     }
 
-    void set_gpio_attr(const std::string &bank, const std::string &attr, const boost::uint32_t value, const boost::uint32_t mask, const size_t mboard)
-    {
-        if (_tree->exists(mb_root(mboard) / "gpio" / bank))
-        {
-            const boost::uint32_t current = _tree->access<boost::uint32_t>(mb_root(mboard) / "gpio" / bank / attr).get();
-            const boost::uint32_t new_value = (current & ~mask) | (value & mask);
-            _tree->access<boost::uint32_t>(mb_root(mboard) / "gpio" / bank / attr).set(new_value);
+    void set_gpio_attr(
+        const std::string &bank,
+        const std::string &attr,
+        const uint32_t value,
+        const uint32_t mask,
+        const size_t mboard
+    ) {
+        std::vector<std::string> attr_value;
+        if (_tree->exists(mb_root(mboard) / "gpio" / bank)) {
+            if (_tree->exists(mb_root(mboard) / "gpio" / bank / attr)){
+                const auto attr_type = gpio_atr::gpio_attr_rev_map.at(attr);
+                switch (attr_type) {
+                    case gpio_atr::GPIO_SRC:
+                        throw uhd::runtime_error(
+                            "Can't set SRC attribute using integer value!"
+                        );
+                        break;
+                    case gpio_atr::GPIO_CTRL:
+                    case gpio_atr::GPIO_DDR: {
+                        attr_value = _tree->access<std::vector<std::string>>(
+                            mb_root(mboard) / "gpio" / bank / attr
+                        ).get();
+                        UHD_ASSERT_THROW(attr_value.size() <= 32);
+                        std::bitset<32> bit_mask = std::bitset<32>(mask);
+                        std::bitset<32> bit_value = std::bitset<32>(value);
+                        for (size_t i = 0; i < bit_mask.size(); i++) {
+                            if (bit_mask[i] == 1) {
+                                attr_value[i] = gpio_atr::attr_value_map.at(attr_type).at(bit_value[i]);
+                            }
+                        }
+                        _tree->access<std::vector<std::string>>(
+                            mb_root(mboard) / "gpio" / bank / attr
+                        ).set(attr_value);
+                    }
+                    break;
+                    default:{
+                        const uint32_t current = _tree->access<uint32_t>(
+                            mb_root(mboard) / "gpio" / bank / attr).get();
+                        const uint32_t new_value = (current & ~mask) | (value & mask);
+                        _tree->access<uint32_t>(mb_root(mboard) / "gpio" / bank / attr).set(new_value);
+                    }
+                    break;
+                }
+                return;
+            } else {
+                throw uhd::runtime_error(str(
+                    boost::format("The hardware has no gpio attribute: `%s':\n")
+                    % attr
+                ));
+            }
+        }
+        if (bank.size() > 2 and bank[1] == 'X') {
+            const std::string name = bank.substr(2);
+            const dboard_iface::unit_t unit =
+                (bank[0] == 'R')
+                ? dboard_iface::UNIT_RX
+                : dboard_iface::UNIT_TX;
+            auto iface = _tree->access<dboard_iface::sptr>(
+                mb_root(mboard) / "dboards" / name / "iface").get();
+            if (attr == gpio_atr::gpio_attr_map.at(gpio_atr::GPIO_CTRL))
+                iface->set_pin_ctrl(unit, uint16_t(value), uint16_t(mask));
+            if (attr == gpio_atr::gpio_attr_map.at(gpio_atr::GPIO_DDR))
+                iface->set_gpio_ddr(unit, uint16_t(value), uint16_t(mask));
+            if (attr == gpio_atr::gpio_attr_map.at(gpio_atr::GPIO_OUT))
+                iface->set_gpio_out(unit, uint16_t(value), uint16_t(mask));
+            if (attr == gpio_atr::gpio_attr_map.at(gpio_atr::GPIO_ATR_0X))
+                iface->set_atr_reg(unit, gpio_atr::ATR_REG_IDLE, uint16_t(value), uint16_t(mask));
+            if (attr == gpio_atr::gpio_attr_map.at(gpio_atr::GPIO_ATR_RX))
+                iface->set_atr_reg(unit, gpio_atr::ATR_REG_RX_ONLY, uint16_t(value), uint16_t(mask));
+            if (attr == gpio_atr::gpio_attr_map.at(gpio_atr::GPIO_ATR_TX))
+                iface->set_atr_reg(unit, gpio_atr::ATR_REG_TX_ONLY, uint16_t(value), uint16_t(mask));
+            if (attr == gpio_atr::gpio_attr_map.at(gpio_atr::GPIO_ATR_XX))
+                iface->set_atr_reg(unit, gpio_atr::ATR_REG_FULL_DUPLEX, uint16_t(value), uint16_t(mask));
+            if (attr == gpio_atr::gpio_attr_map.at(gpio_atr::GPIO_SRC)) {
+                throw uhd::runtime_error("Setting gpio source does not supported in daughter board.");
+            }
             return;
         }
-        if (bank.size() > 2 and bank[1] == 'X')
-        {
-            const std::string name = bank.substr(2);
-            const dboard_iface::unit_t unit = (bank[0] == 'R')? dboard_iface::UNIT_RX : dboard_iface::UNIT_TX;
-            dboard_iface::sptr iface = _tree->access<dboard_iface::sptr>(mb_root(mboard) / "dboards" / name / "iface").get();
-            if (attr == "CTRL") iface->set_pin_ctrl(unit, boost::uint16_t(value), boost::uint16_t(mask));
-            if (attr == "DDR") iface->set_gpio_ddr(unit, boost::uint16_t(value), boost::uint16_t(mask));
-            if (attr == "OUT") iface->set_gpio_out(unit, boost::uint16_t(value), boost::uint16_t(mask));
-            if (attr == "ATR_0X") iface->set_atr_reg(unit, gpio_atr::ATR_REG_IDLE, boost::uint16_t(value), boost::uint16_t(mask));
-            if (attr == "ATR_RX") iface->set_atr_reg(unit, gpio_atr::ATR_REG_RX_ONLY, boost::uint16_t(value), boost::uint16_t(mask));
-            if (attr == "ATR_TX") iface->set_atr_reg(unit, gpio_atr::ATR_REG_TX_ONLY, boost::uint16_t(value), boost::uint16_t(mask));
-            if (attr == "ATR_XX") iface->set_atr_reg(unit, gpio_atr::ATR_REG_FULL_DUPLEX, boost::uint16_t(value), boost::uint16_t(mask));
-        }
+        throw uhd::runtime_error(str(
+            boost::format("The hardware has no GPIO bank `%s'")
+            % bank
+        ));
     }
 
-    boost::uint32_t get_gpio_attr(const std::string &bank, const std::string &attr, const size_t mboard)
-    {
-        if (_tree->exists(mb_root(mboard) / "gpio" / bank))
-        {
-            return boost::uint32_t(_tree->access<boost::uint64_t>(mb_root(mboard) / "gpio" / bank / attr).get());
+    void set_gpio_attr(
+            const std::string &bank,
+            const std::string &attr,
+            const std::string &str_value,
+            const uint32_t mask,
+            const size_t mboard
+    ) {
+        const auto attr_type = gpio_atr::gpio_attr_rev_map.at(attr);
+        if (_tree->exists(mb_root(mboard) / "gpio" / bank)) {
+            if (_tree->exists(mb_root(mboard) / "gpio" / bank / attr)) {
+                switch (attr_type){
+                    case gpio_atr::GPIO_SRC:
+                    case gpio_atr::GPIO_CTRL:
+                    case gpio_atr::GPIO_DDR:{
+                        auto attr_value =
+                            _tree->access<std::vector<std::string>>(
+                                mb_root(mboard) / "gpio" / bank / attr).get();
+                        UHD_ASSERT_THROW(attr_value.size() <= 32);
+                        std::bitset<32> bit_mask = std::bitset<32>(mask);
+                        for (size_t i = 0 ; i < bit_mask.size(); i++) {
+                            if (bit_mask[i] == 1) {
+                                attr_value[i] = str_value;
+                            }
+                        }
+                        _tree->access<std::vector<std::string>>(
+                               mb_root(mboard) / "gpio" / bank / attr
+                        ).set(attr_value);
+                    }
+                    break;
+                    default: {
+                        const uint32_t value =
+                            gpio_atr::gpio_attr_value_pair.at(attr).at(str_value) == 0 ? -1 : 0;
+                        const uint32_t current = _tree->access<uint32_t>(
+                            mb_root(mboard) / "gpio" / bank / attr).get();
+                        const uint32_t new_value =
+                            (current & ~mask) | (value & mask);
+                        _tree->access<uint32_t>(
+                            mb_root(mboard) / "gpio" / bank / attr
+                        ).set(new_value);
+                    }
+                    break;
+                }
+                return;
+            } else {
+                throw uhd::runtime_error(str(
+                    boost::format("The hardware has no gpio attribute `%s'")
+                    % attr
+                ));
+            }
         }
-        if (bank.size() > 2 and bank[1] == 'X')
-        {
+        // If the bank is not in the prop tree, convert string value to integer
+        // value and have it handled by the other set_gpio_attr()
+        const uint32_t value =
+            gpio_atr::gpio_attr_value_pair.at(attr).at(str_value) == 0
+            ? -1
+            : 0;
+        set_gpio_attr(
+            bank,
+            attr,
+            value,
+            mask,
+            mboard
+        );
+    }
+
+    uint32_t get_gpio_attr(
+            const std::string &bank,
+            const std::string &attr,
+            const size_t mboard
+    ) {
+        std::vector<std::string> str_val;
+
+        if (_tree->exists(mb_root(mboard) / "gpio" / bank)) {
+            if (_tree->exists(mb_root(mboard) / "gpio" / bank / attr)) {
+                const auto attr_type = gpio_atr::gpio_attr_rev_map.at(attr);
+                switch (attr_type){
+                    case gpio_atr::GPIO_SRC:
+                        throw uhd::runtime_error("Can't set SRC attribute using integer value");
+                    case gpio_atr::GPIO_CTRL:
+                    case gpio_atr::GPIO_DDR: {
+                        str_val = _tree->access<std::vector<std::string>>(
+                            mb_root(mboard) / "gpio" / bank / attr).get();
+                        uint32_t val = 0;
+                        for(size_t i = 0 ; i < str_val.size() ; i++) {
+                            val += usrp::gpio_atr::gpio_attr_value_pair.at(attr).at(str_val[i]) << i;
+                        }
+                        return val;
+                    }
+                    default:
+                        return uint32_t(_tree->access<uint64_t>(
+                            mb_root(mboard) / "gpio" / bank / attr).get());
+                }
+                return 0;
+            } else {
+                throw uhd::runtime_error(str(
+                    boost::format("The hardware has no gpio attribute: `%s'")
+                    % attr
+                ));
+            }
+        }
+        if (bank.size() > 2 and bank[1] == 'X') {
             const std::string name = bank.substr(2);
             const dboard_iface::unit_t unit = (bank[0] == 'R')? dboard_iface::UNIT_RX : dboard_iface::UNIT_TX;
-            dboard_iface::sptr iface = _tree->access<dboard_iface::sptr>(mb_root(mboard) / "dboards" / name / "iface").get();
-            if (attr == "CTRL") return iface->get_pin_ctrl(unit);
-            if (attr == "DDR") return iface->get_gpio_ddr(unit);
-            if (attr == "OUT") return iface->get_gpio_out(unit);
-            if (attr == "ATR_0X") return iface->get_atr_reg(unit, gpio_atr::ATR_REG_IDLE);
-            if (attr == "ATR_RX") return iface->get_atr_reg(unit, gpio_atr::ATR_REG_RX_ONLY);
-            if (attr == "ATR_TX") return iface->get_atr_reg(unit, gpio_atr::ATR_REG_TX_ONLY);
-            if (attr == "ATR_XX") return iface->get_atr_reg(unit, gpio_atr::ATR_REG_FULL_DUPLEX);
+            auto iface = _tree->access<dboard_iface::sptr>(
+                mb_root(mboard) / "dboards" / name / "iface").get();
+            if (attr == "CTRL")     return iface->get_pin_ctrl(unit);
+            if (attr == "DDR")      return iface->get_gpio_ddr(unit);
+            if (attr == "OUT")      return iface->get_gpio_out(unit);
+            if (attr == "ATR_0X")   return iface->get_atr_reg(unit, gpio_atr::ATR_REG_IDLE);
+            if (attr == "ATR_RX")   return iface->get_atr_reg(unit, gpio_atr::ATR_REG_RX_ONLY);
+            if (attr == "ATR_TX")   return iface->get_atr_reg(unit, gpio_atr::ATR_REG_TX_ONLY);
+            if (attr == "ATR_XX")   return iface->get_atr_reg(unit, gpio_atr::ATR_REG_FULL_DUPLEX);
             if (attr == "READBACK") return iface->read_gpio(unit);
         }
-        return 0;
+        throw uhd::runtime_error(str(
+            boost::format("The hardware has no gpio bank `%s'")
+            % bank
+        ));
     }
 
-    void write_register(const std::string &path, const boost::uint32_t field, const boost::uint64_t value, const size_t mboard)
+    std::vector<std::string> get_gpio_string_attr(
+        const std::string &bank,
+        const std::string &attr,
+        const size_t mboard
+    ) {
+        const auto attr_type = gpio_atr::gpio_attr_rev_map.at(attr);
+        auto str_val = std::vector<std::string>(32, gpio_atr::default_attr_value_map.at(attr_type));
+        if (_tree->exists(mb_root(mboard) / "gpio" / bank)) {
+            if (_tree->exists(mb_root(mboard) / "gpio" / bank / attr)) {
+                const auto attr_type = gpio_atr::gpio_attr_rev_map.at(attr);
+                switch (attr_type){
+                    case gpio_atr::GPIO_SRC:
+                    case gpio_atr::GPIO_CTRL:
+                    case gpio_atr::GPIO_DDR:
+                        return _tree->access<std::vector<std::string>>(mb_root(mboard) / "gpio" / bank / attr).get();
+                    default: {
+                        uint32_t value = uint32_t(_tree->access<uint32_t>(mb_root(mboard) / "gpio" / bank / attr).get());
+                        std::bitset<32> bit_value = std::bitset<32>(value);
+                        for (size_t i = 0; i < bit_value.size(); i++)
+                        {
+                            str_val[i] = bit_value[i] == 0 ? "LOW" : "HIGH";
+                        }
+                        return str_val;
+                    }
+                }
+            }
+            else {
+                throw uhd::runtime_error(str(
+                    boost::format("The hardware has no gpio attribute: `%s'")
+                    % attr
+                ));
+            }
+        }
+        throw uhd::runtime_error(str(
+            boost::format("The hardware has no support for given gpio bank name `%s'")
+            % bank
+        ));
+    }
+
+    void write_register(const std::string &path, const uint32_t field, const uint64_t value, const size_t mboard)
     {
         if (_tree->exists(mb_root(mboard) / "registers"))
         {
@@ -1587,16 +2393,16 @@ public:
             switch (reg.get_bitwidth()) {
             case 16:
                 if (reg.is_readable())
-                    uhd::soft_register_base::cast<uhd::soft_reg16_rw_t>(reg).write(field, static_cast<boost::uint16_t>(value));
+                    uhd::soft_register_base::cast<uhd::soft_reg16_rw_t>(reg).write(field, static_cast<uint16_t>(value));
                 else
-                    uhd::soft_register_base::cast<uhd::soft_reg16_wo_t>(reg).write(field, static_cast<boost::uint16_t>(value));
+                    uhd::soft_register_base::cast<uhd::soft_reg16_wo_t>(reg).write(field, static_cast<uint16_t>(value));
             break;
 
             case 32:
                 if (reg.is_readable())
-                    uhd::soft_register_base::cast<uhd::soft_reg32_rw_t>(reg).write(field, static_cast<boost::uint32_t>(value));
+                    uhd::soft_register_base::cast<uhd::soft_reg32_rw_t>(reg).write(field, static_cast<uint32_t>(value));
                 else
-                    uhd::soft_register_base::cast<uhd::soft_reg32_wo_t>(reg).write(field, static_cast<boost::uint32_t>(value));
+                    uhd::soft_register_base::cast<uhd::soft_reg32_wo_t>(reg).write(field, static_cast<uint32_t>(value));
             break;
 
             case 64:
@@ -1615,7 +2421,7 @@ public:
         }
     }
 
-    boost::uint64_t read_register(const std::string &path, const boost::uint32_t field, const size_t mboard)
+    uint64_t read_register(const std::string &path, const uint32_t field, const size_t mboard)
     {
         if (_tree->exists(mb_root(mboard) / "registers"))
         {
@@ -1630,16 +2436,16 @@ public:
             switch (reg.get_bitwidth()) {
             case 16:
                 if (reg.is_writable())
-                    return static_cast<boost::uint64_t>(uhd::soft_register_base::cast<uhd::soft_reg16_rw_t>(reg).read(field));
+                    return static_cast<uint64_t>(uhd::soft_register_base::cast<uhd::soft_reg16_rw_t>(reg).read(field));
                 else
-                    return static_cast<boost::uint64_t>(uhd::soft_register_base::cast<uhd::soft_reg16_ro_t>(reg).read(field));
+                    return static_cast<uint64_t>(uhd::soft_register_base::cast<uhd::soft_reg16_ro_t>(reg).read(field));
             break;
 
             case 32:
                 if (reg.is_writable())
-                    return static_cast<boost::uint64_t>(uhd::soft_register_base::cast<uhd::soft_reg32_rw_t>(reg).read(field));
+                    return static_cast<uint64_t>(uhd::soft_register_base::cast<uhd::soft_reg32_rw_t>(reg).read(field));
                 else
-                    return static_cast<boost::uint64_t>(uhd::soft_register_base::cast<uhd::soft_reg32_ro_t>(reg).read(field));
+                    return static_cast<uint64_t>(uhd::soft_register_base::cast<uhd::soft_reg32_ro_t>(reg).read(field));
             break;
 
             case 64:
@@ -1731,8 +2537,12 @@ private:
     {
         try
         {
-            const std::string name = _tree->list("/mboards").at(mboard);
-            return "/mboards/" + name;
+            const std::string tree_path = "/mboards/" + std::to_string(mboard);
+            if (_tree->exists(tree_path)) {
+                return tree_path;
+            } else {
+                throw uhd::index_error(str(boost::format("multi_usrp::mb_root(%u) - path not found") % mboard));
+            }
         }
         catch(const std::exception &e)
         {
@@ -1755,8 +2565,12 @@ private:
 
         try
         {
-            const std::string name = _tree->list(mb_root(mcp.mboard) / "rx_dsps").at(mcp.chan);
-            return mb_root(mcp.mboard) / "rx_dsps" / name;
+            const std::string tree_path = mb_root(mcp.mboard) / "rx_dsps" / mcp.chan;
+            if (_tree->exists(tree_path)) {
+                return tree_path;
+            } else {
+                throw uhd::index_error(str(boost::format("multi_usrp::rx_dsp_root(%u) - mcp(%u) - path not found") % chan % mcp.chan));
+            }
         }
         catch(const std::exception &e)
         {
@@ -1778,8 +2592,12 @@ private:
         }
         try
         {
-            const std::string name = _tree->list(mb_root(mcp.mboard) / "tx_dsps").at(mcp.chan);
-            return mb_root(mcp.mboard) / "tx_dsps" / name;
+            const std::string tree_path = mb_root(mcp.mboard) / "tx_dsps" / mcp.chan;
+            if (_tree->exists(tree_path)) {
+                return tree_path;
+            } else {
+                throw uhd::index_error(str(boost::format("multi_usrp::tx_dsp_root(%u) - mcp(%u) - path not found") % chan % mcp.chan));
+            }
         }
         catch(const std::exception &e)
         {
@@ -1821,6 +2639,24 @@ private:
         }
     }
 
+    size_t get_radio_index(const std::string slot_name)
+    {
+        if (slot_name == "A") {
+            return 0;
+        } else if (slot_name == "B") {
+            return 1;
+        } else if (slot_name == "C") {
+            return 2;
+        } else if (slot_name == "D") {
+            return  3;
+        } else {
+           throw uhd::key_error(str(
+                boost::format("[multi_usrp]: radio slot name %s out of supported range.")
+                % slot_name
+            ));
+        }
+    }
+
     fs_path rx_rf_fe_root(const size_t chan)
     {
         mboard_chan_pair mcp = rx_chan_to_mcp(chan);
@@ -1853,10 +2689,10 @@ private:
         mboard_chan_pair mcp = rx_chan_to_mcp(chan);
         const subdev_spec_pair_t spec = get_rx_subdev_spec(mcp.mboard).at(mcp.chan);
         gain_group::sptr gg = gain_group::make();
-        BOOST_FOREACH(const std::string &name, _tree->list(mb_root(mcp.mboard) / "rx_codecs" / spec.db_name / "gains")){
+        for(const std::string &name:  _tree->list(mb_root(mcp.mboard) / "rx_codecs" / spec.db_name / "gains")){
             gg->register_fcns("ADC-"+name, make_gain_fcns_from_subtree(_tree->subtree(mb_root(mcp.mboard) / "rx_codecs" / spec.db_name / "gains" / name)), 0 /* low prio */);
         }
-        BOOST_FOREACH(const std::string &name, _tree->list(rx_rf_fe_root(chan) / "gains")){
+        for(const std::string &name:  _tree->list(rx_rf_fe_root(chan) / "gains")){
             gg->register_fcns(name, make_gain_fcns_from_subtree(_tree->subtree(rx_rf_fe_root(chan) / "gains" / name)), 1 /* high prio */);
         }
         return gg;
@@ -1866,10 +2702,10 @@ private:
         mboard_chan_pair mcp = tx_chan_to_mcp(chan);
         const subdev_spec_pair_t spec = get_tx_subdev_spec(mcp.mboard).at(mcp.chan);
         gain_group::sptr gg = gain_group::make();
-        BOOST_FOREACH(const std::string &name, _tree->list(mb_root(mcp.mboard) / "tx_codecs" / spec.db_name / "gains")){
+        for(const std::string &name:  _tree->list(mb_root(mcp.mboard) / "tx_codecs" / spec.db_name / "gains")){
             gg->register_fcns("DAC-"+name, make_gain_fcns_from_subtree(_tree->subtree(mb_root(mcp.mboard) / "tx_codecs" / spec.db_name / "gains" / name)), 1 /* high prio */);
         }
-        BOOST_FOREACH(const std::string &name, _tree->list(tx_rf_fe_root(chan) / "gains")){
+        for(const std::string &name:  _tree->list(tx_rf_fe_root(chan) / "gains")){
             gg->register_fcns(name, make_gain_fcns_from_subtree(_tree->subtree(tx_rf_fe_root(chan) / "gains" / name)), 0 /* low prio */);
         }
         return gg;
@@ -1877,12 +2713,13 @@ private:
 
     //! \param is_tx True for tx
     // Assumption is that all mboards use the same link
+    // and that the rate sum is evenly distributed among the mboards
     bool _check_link_rate(const stream_args_t &args, bool is_tx) {
         bool link_rate_is_ok = true;
         size_t bytes_per_sample = convert::get_bytes_per_item(args.otw_format.empty() ? "sc16" : args.otw_format);
         double max_link_rate = 0;
         double sum_rate = 0;
-        BOOST_FOREACH(const size_t chan, args.channels) {
+        for(const size_t chan:  args.channels) {
             mboard_chan_pair mcp = is_tx ? tx_chan_to_mcp(chan) : rx_chan_to_mcp(chan);
             if (_tree->exists(mb_root(mcp.mboard) / "link_max_rate")) {
                 max_link_rate = std::max(
@@ -1892,11 +2729,12 @@ private:
             }
             sum_rate += is_tx ? get_tx_rate(chan) : get_rx_rate(chan);
         }
+        sum_rate /= get_num_mboards();
         if (max_link_rate > 0 and (max_link_rate / bytes_per_sample) < sum_rate) {
-            UHD_MSG(warning) << boost::format(
+            UHD_LOGGER_WARNING("MULTI_USRP") << boost::format(
                 "The total sum of rates (%f MSps on %u channels) exceeds the maximum capacity of the connection.\n"
                 "This can cause %s."
-            ) % (sum_rate/1e6) % args.channels.size() % (is_tx ? "underruns (U)" : "overflows (O)")  << std::endl;
+            ) % (sum_rate/1e6) % args.channels.size() % (is_tx ? "underruns (U)" : "overflows (O)")  ;
             link_rate_is_ok = false;
         }
 
@@ -1912,6 +2750,6 @@ multi_usrp::~multi_usrp(void){
  * The Make Function
  **********************************************************************/
 multi_usrp::sptr multi_usrp::make(const device_addr_t &dev_addr){
-    UHD_LOG << "multi_usrp::make with args " << dev_addr.to_pp_string() << std::endl;
+    UHD_LOGGER_TRACE("MULTI_USRP") << "multi_usrp::make with args " << dev_addr.to_pp_string() ;
     return sptr(new multi_usrp_impl(dev_addr));
 }
